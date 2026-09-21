@@ -5,6 +5,49 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-09-21
+
+### Added
+
+- Artifact metadata table (`artifacts`, migration `0004`): the worker now
+  registers each artifact and its permanent download token at build time
+  (`src/worker/artifacts.mjs`), replacing the old approach of scanning the
+  artifacts directory and lazily creating a token on the first listing
+  request. `GET /api/v1/builds/:id/artifacts` now reads this table.
+- Artifact download token revocation:
+  `DELETE /api/v1/builds/:id/artifacts/:filename/download-token`.
+- API key scopes (`api_keys.scopes` column) and a `requireScope`/
+  `requireBuildAccess` middleware layer covering PROJECT-SCOPE.md's listed
+  scopes (`build:create`, `build:read`, `build:logs`, `build:cancel`,
+  `artifact:download`, `artifact:manage`, `api-key:manage`), plus
+  `build:read:any` for admin-style cross-tenant access. A key created with
+  no `--scopes` gets full access — existing keys with no recorded scopes
+  keep working unchanged.
+- API key management over HTTP (`api-key:manage` scoped):
+  `POST/GET /api/v1/api-keys`, `DELETE /api/v1/api-keys/:id`. The CLI
+  script (`scripts/create-api-key.mjs`) now also accepts `--scopes`.
+- Build cancellation: `POST /api/v1/builds/:id/cancel` — removes a still-
+  queued build from the queue directly, or `docker kill`s a running
+  build's container by its deterministic name and reports it `cancelled`
+  rather than `failed`.
+- Multi-tenant build isolation: every build now records the submitting
+  `api_key_id`; a key can only read/cancel/download artifacts for its own
+  builds unless it holds `build:read:any`. Mismatches return 404, not 403,
+  to avoid confirming a build ID exists. Builds with no recorded owner
+  (pre-existing data) remain accessible to any key with the right scope.
+- Retention/cleanup (`scripts/cleanup.mjs`, `RETENTION_DAYS`): deletes the
+  on-disk `builds/<id>` directory for old completed/failed/cancelled
+  builds and disables their artifact records and download tokens. The
+  `builds` table row itself is kept for history.
+
+Verified end-to-end against a live server: multi-tenant isolation (a
+second client gets 404 on another client's build; an admin-scoped key
+still sees it), scope enforcement (403 on missing scopes), the full
+artifact lifecycle (register → list → public download → revoke → 404,
+with the authenticated filesystem-based download unaffected by
+revocation), API key management over HTTP, and retention cleanup
+correctly disabling a backdated build's artifacts.
+
 ## [0.4.0] - 2026-09-21
 
 ### Added
@@ -112,6 +155,7 @@ through the live HTTP API (submit → building → failed, with the persisted
   unguessable artifact download tokens, and a real Clocker release build
   completed end-to-end through the generic worker.
 
+[0.5.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.5.0
 [0.4.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.4.0
 [0.3.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.3.0
 [0.2.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.2.0

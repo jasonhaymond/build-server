@@ -170,22 +170,26 @@ export function createApiKey({
   name,
   keyHash,
   createdAt,
+  scopes,
 }) {
   return db.prepare(`
     INSERT INTO api_keys (
       name,
       key_hash,
-      created_at
+      created_at,
+      scopes
     )
     VALUES (
       @name,
       @keyHash,
-      @createdAt
+      @createdAt,
+      @scopes
     )
   `).run({
     name,
     keyHash,
     createdAt,
+    scopes: scopes ?? null,
   });
 }
 
@@ -196,11 +200,37 @@ export function getApiKeyByHash(keyHash) {
       name,
       key_hash AS keyHash,
       created_at AS createdAt,
-      enabled
+      enabled,
+      scopes
     FROM api_keys
     WHERE key_hash = ?
       AND enabled = 1
   `).get(keyHash);
+}
+
+export function listApiKeys() {
+  return db.prepare(`
+    SELECT
+      id,
+      name,
+      created_at AS createdAt,
+      enabled,
+      scopes
+    FROM api_keys
+    ORDER BY created_at ASC
+  `).all();
+}
+
+export function getApiKeyById(id) {
+  return db.prepare(`
+    SELECT id, name, created_at AS createdAt, enabled, scopes
+    FROM api_keys
+    WHERE id = ?
+  `).get(id);
+}
+
+export function disableApiKey(id) {
+  db.prepare(`UPDATE api_keys SET enabled = 0 WHERE id = ?`).run(id);
 }
 
 
@@ -264,4 +294,83 @@ export function getArtifactDownloadToken(tokenHash) {
     WHERE token_hash = ?
       AND enabled = 1
   `).get(tokenHash);
+}
+
+export function disableArtifactDownloadTokenForArtifact({ buildId, filename }) {
+  db.prepare(`
+    UPDATE artifact_download_tokens
+    SET enabled = 0
+    WHERE build_id = ?
+      AND filename = ?
+  `).run(buildId, filename);
+}
+
+// Written by the worker once it copies an artifact out of the build
+// container — replaces the old scan-the-directory-and-lazily-create-a-
+// token approach with a proper metadata table populated at build time.
+export function createArtifactRecord({
+  buildId,
+  filename,
+  type,
+  size,
+  createdAt,
+  downloadTokenId,
+}) {
+  return db.prepare(`
+    INSERT INTO artifacts (
+      build_id,
+      filename,
+      type,
+      size,
+      created_at,
+      download_token_id
+    )
+    VALUES (
+      @buildId,
+      @filename,
+      @type,
+      @size,
+      @createdAt,
+      @downloadTokenId
+    )
+  `).run({
+    buildId,
+    filename,
+    type: type ?? null,
+    size,
+    createdAt,
+    downloadTokenId,
+  });
+}
+
+export function getArtifactsForBuild(buildId) {
+  return db.prepare(`
+    SELECT
+      a.filename AS filename,
+      a.size AS size,
+      a.type AS type,
+      t.token_hash AS downloadToken
+    FROM artifacts a
+    JOIN artifact_download_tokens t ON t.id = a.download_token_id
+    WHERE a.build_id = ?
+      AND a.enabled = 1
+      AND t.enabled = 1
+    ORDER BY a.created_at ASC
+  `).all(buildId);
+}
+
+// Retention/cleanup: builds whose terminal state is old enough to sweep.
+export function getCleanableBuilds(cutoffIso) {
+  return db.prepare(`
+    SELECT id
+    FROM builds
+    WHERE status IN ('completed', 'failed', 'cancelled')
+      AND completed_at IS NOT NULL
+      AND completed_at < ?
+  `).all(cutoffIso);
+}
+
+export function disableArtifactsForBuild(buildId) {
+  db.prepare(`UPDATE artifacts SET enabled = 0 WHERE build_id = ?`).run(buildId);
+  db.prepare(`UPDATE artifact_download_tokens SET enabled = 0 WHERE build_id = ?`).run(buildId);
 }

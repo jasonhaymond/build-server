@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { execFileSync, spawn } from "node:child_process";
 import yauzl from "yauzl";
 import { validateGitSource } from "../security/gitSource.mjs";
+import { registerArtifact } from "./artifacts.mjs";
 
 const serverDir = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const buildsDir = resolve(serverDir, "builds");
@@ -680,10 +681,14 @@ if (!existsSync(containerArtifact)) {
 
 cpSync(containerArtifact, artifactDestination);
 
-const sizeMb = (
-  statSync(artifactDestination).size /
-  (1024 * 1024)
-).toFixed(1);
+const { size: artifactSize } = registerArtifact({
+  buildId: job.id,
+  filename: artifactDestination.split(/[\\/]/).pop(),
+  type: job.build.artifact,
+  path: artifactDestination,
+});
+
+const sizeMb = (artifactSize / (1024 * 1024)).toFixed(1);
 
 log("");
 log("=== BUILD COMPLETE ===");

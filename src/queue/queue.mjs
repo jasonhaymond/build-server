@@ -9,7 +9,33 @@ export const queueState = {
   buildQueue: [],
   builds: new Map(),
   activeBuild: false,
+  // Build ids currently being cancelled (docker kill sent, awaiting the
+  // worker's close event) — lets the close handler report "cancelled"
+  // instead of the generic "failed" a killed container would otherwise get.
+  cancelling: new Set(),
 };
+
+// Removes a not-yet-started build from the queue. Returns false if the
+// build isn't queued (it's already building, or doesn't exist) — the
+// caller is responsible for cancelling an in-progress build instead.
+export function cancelQueuedBuild(id) {
+  const index = queueState.buildQueue.indexOf(id);
+
+  if (index === -1) {
+    return false;
+  }
+
+  queueState.buildQueue.splice(index, 1);
+  queueState.builds.delete(id);
+
+  updateBuild(id, {
+    status: "cancelled",
+    completedAt: new Date().toISOString(),
+    cancellationState: "cancelled",
+  });
+
+  return true;
+}
 
 export function processQueue() {
   if (queueState.activeBuild || queueState.buildQueue.length === 0) {
@@ -84,7 +110,18 @@ export function processQueue() {
     build.exitCode = exitCode;
     build.completedAt = completedAt;
 
-    if (exitCode === 0) {
+    if (queueState.cancelling.delete(id)) {
+      build.status = "cancelled";
+
+      updateBuild(id, {
+        status: "cancelled",
+        completedAt,
+        exitCode,
+        cancellationState: "cancelled",
+      });
+
+      console.log(`Build cancelled: ${id}`);
+    } else if (exitCode === 0) {
       build.status = "completed";
 
       updateBuild(id, {
