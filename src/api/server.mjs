@@ -5,7 +5,6 @@ import {
   createHash,
   randomBytes,
 } from "node:crypto";
-import { spawn } from "node:child_process";
 import {
   existsSync,
   readFileSync,
@@ -20,14 +19,26 @@ import {
   getArtifactDownloadToken,
   getArtifactDownloadTokenForArtifact,
   getBuild,
-  updateBuild,
 } from "../db/database.mjs";
+import { serializeJobForQueue } from "../queue/jobPayload.mjs";
+import { processQueue, queueState } from "../queue/queue.mjs";
+import { reconstructQueueOnStartup } from "../queue/recovery.mjs";
+import { encryptSecrets } from "../security/secrets.mjs";
 
 const app = express();
 const port = Number(process.env.PORT ?? 8080);
 const publicBaseUrl = (
   process.env.PUBLIC_BASE_URL ?? "http://localhost:8080"
 ).replace(/\/$/, "");
+const secretsKey = process.env.JOB_SECRETS_ENCRYPTION_KEY;
+
+// Fail fast at startup rather than on the first build submission.
+try {
+  encryptSecrets({}, secretsKey);
+} catch (error) {
+  console.error(error.message);
+  process.exit(1);
+}
 
 app.use(express.json({ limit: "1mb" }));
 
@@ -71,11 +82,6 @@ function authenticateApiKey(req, res, next) {
 }
 
 
-const buildQueue = [];
-const builds = new Map();
-
-let activeBuild = false;
-
 function createBuildId() {
   return `bld_${Date.now().toString(36)}_${randomBytes(4).toString("hex")}`;
 }
@@ -98,108 +104,12 @@ function sanitizeBuildForResponse(build) {
   };
 }
 
-function processQueue() {
-  if (activeBuild || buildQueue.length === 0) {
-    return;
-  }
-
-  const id = buildQueue.shift();
-  const build = builds.get(id);
-
-  if (!build) {
-    processQueue();
-    return;
-  }
-
-  activeBuild = true;
-
-  const startedAt = new Date().toISOString();
-
-  build.status = "building";
-  build.startedAt = startedAt;
-
-  updateBuild(id, {
-    status: "building",
-    startedAt,
-  });
-
-  console.log(`Starting build: ${id}`);
-
-  const worker = spawn(
-    "node",
-    ["src/worker/index.mjs"],
-    {
-      cwd: process.cwd(),
-      stdio: ["pipe", "inherit", "inherit"],
-    },
-  );
-
-  worker.stdin.write(JSON.stringify(build.job));
-  worker.stdin.end();
-
-  worker.on("error", (error) => {
-    console.error(`Worker failed to start for ${id}:`, error);
-
-    const completedAt = new Date().toISOString();
-
-    build.status = "failed";
-    build.error = error.message;
-    build.completedAt = completedAt;
-    build.exitCode = 1;
-
-    updateBuild(id, {
-      status: "failed",
-      error: error.message,
-      completedAt,
-      exitCode: 1,
-    });
-
-    activeBuild = false;
-    processQueue();
-  });
-
-  worker.on("close", (code) => {
-    const completedAt = new Date().toISOString();
-    const exitCode = code ?? 1;
-
-    build.exitCode = exitCode;
-    build.completedAt = completedAt;
-
-    if (exitCode === 0) {
-      build.status = "completed";
-
-      updateBuild(id, {
-        status: "completed",
-        completedAt,
-        exitCode,
-      });
-
-      console.log(`Build completed: ${id}`);
-    } else {
-      build.status = "failed";
-
-      updateBuild(id, {
-        status: "failed",
-        completedAt,
-        exitCode,
-      });
-
-      console.error(
-        `Build failed: ${id} (exit code ${exitCode})`,
-      );
-    }
-
-    activeBuild = false;
-    processQueue();
-  });
-}
-
 app.get("/health", (req, res) => {
   res.json({
     status: "ok",
     service: "build-server",
-    activeBuild,
-    queuedBuilds: buildQueue.length,
+    activeBuild: queueState.activeBuild,
+    queuedBuilds: queueState.buildQueue.length,
   });
 });
 
@@ -235,15 +145,21 @@ app.post("/api/v1/builds", (req, res) => {
     job: workerJob,
   };
 
-  builds.set(id, build);
+  queueState.builds.set(id, build);
 
   createBuild({
     id,
     projectName: job.project.name,
     submittedAt,
+    jobPayload: serializeJobForQueue(workerJob, secretsKey),
+    platform: job.build?.platform ?? null,
+    variant: job.build?.variant ?? null,
+    artifactType: job.build?.artifact ?? null,
+    apiKeyId: req.apiKey.id,
+    submittedBy: req.apiKey.name,
   });
 
-  buildQueue.push(id);
+  queueState.buildQueue.push(id);
 
   console.log(`Build queued: ${id}`);
 
@@ -477,7 +393,9 @@ app.get("/api/v1/builds/:id/artifacts/:filename", (req, res) => {
   );
 });
 
+reconstructQueueOnStartup();
+
 app.listen(port, () => {
-  console.log(`Android Build API listening on port ${port}`);
+  console.log(`Build API listening on port ${port}`);
 });
 

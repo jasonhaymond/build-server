@@ -5,6 +5,45 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-09-21
+
+### Added
+
+- Persistent build queue and restart recovery — PROJECT-SCOPE.md's own
+  stated "Immediate Next Task." The API now persists each build's full job
+  (env plaintext, secrets encrypted at rest with a new
+  `JOB_SECRETS_ENCRYPTION_KEY`, AES-256-GCM) to SQLite at submission time,
+  and reconstructs the in-memory queue from the database on startup
+  (`src/queue/recovery.mjs`):
+  - Builds still `queued` when the API last stopped are decrypted and
+    re-enqueued in original submission order.
+  - Builds that were `building` are checked against the Docker daemon by
+    their deterministic container name
+    (`build-<platform>-<buildId>`, added in 0.3.0). If the container is
+    still running, the API reattaches to it (`docker logs -f` / `docker
+    wait`) instead of requeuing a duplicate build. If it's gone, the build
+    is marked `failed` with `failure_reason: "Interrupted by server
+    restart"`.
+  - The encrypted job payload is overwritten with the existing `***`-masked
+    form as soon as a build actually starts — it only needs to exist while
+    a build is genuinely queued.
+  - The API now refuses to start if `JOB_SECRETS_ENCRYPTION_KEY` is missing
+    or malformed, rather than failing on the first submission.
+- New `builds` columns (migration `0003_queue_recovery`) for the queue
+  payload and the metadata PROJECT-SCOPE.md's Database section calls out
+  as future fields: `platform`, `variant`, `artifact_type`, `duration_ms`,
+  `worker`, `failure_reason`, `cancellation_state`, `submitted_by`,
+  `api_key_id`.
+
+Verified against real dependencies (no mocks): a `building` row with a
+live matching container reattaches and completes correctly; one with no
+matching container is marked failed as interrupted; a `queued` row's
+encrypted job (including a real secret) round-trips through decryption and
+runs through the actual worker process, and the raw database file never
+contains the plaintext secret at any point. Also verified end-to-end
+through the live HTTP API (submit → building → failed, with the persisted
+`job_payload` masked once the build started).
+
 ## [0.3.0] - 2026-09-21
 
 ### Added
@@ -73,6 +112,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   unguessable artifact download tokens, and a real Clocker release build
   completed end-to-end through the generic worker.
 
+[0.4.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.4.0
 [0.3.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.3.0
 [0.2.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.2.0
 [0.1.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.1.0

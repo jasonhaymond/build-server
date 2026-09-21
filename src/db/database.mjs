@@ -26,25 +26,49 @@ export function createBuild({
   id,
   projectName,
   submittedAt,
+  jobPayload,
+  platform,
+  variant,
+  artifactType,
+  apiKeyId,
+  submittedBy,
 }) {
   db.prepare(`
     INSERT INTO builds (
       id,
       project_name,
       status,
-      submitted_at
+      submitted_at,
+      job_payload,
+      platform,
+      variant,
+      artifact_type,
+      api_key_id,
+      submitted_by
     )
     VALUES (
       @id,
       @projectName,
       @status,
-      @submittedAt
+      @submittedAt,
+      @jobPayload,
+      @platform,
+      @variant,
+      @artifactType,
+      @apiKeyId,
+      @submittedBy
     )
   `).run({
     id,
     projectName,
     status: "queued",
     submittedAt,
+    jobPayload: jobPayload ?? null,
+    platform: platform ?? null,
+    variant: variant ?? null,
+    artifactType: artifactType ?? null,
+    apiKeyId: apiKeyId ?? null,
+    submittedBy: submittedBy ?? null,
   });
 }
 
@@ -55,6 +79,11 @@ export function updateBuild(id, fields) {
     "completedAt",
     "exitCode",
     "error",
+    "jobPayload",
+    "durationMs",
+    "worker",
+    "failureReason",
+    "cancellationState",
   ];
 
   const updates = [];
@@ -93,21 +122,46 @@ export function getBuild(id) {
       started_at AS startedAt,
       completed_at AS completedAt,
       exit_code AS exitCode,
-      error
+      error,
+      platform,
+      variant,
+      artifact_type AS artifactType,
+      failure_reason AS failureReason,
+      cancellation_state AS cancellationState,
+      api_key_id AS apiKeyId
     FROM builds
     WHERE id = ?
   `).get(id);
 }
 
-export function getQueuedBuilds() {
+// Used at API startup to reconstruct the in-memory queue — includes the
+// persisted (possibly secret-encrypted) job payload needed to actually
+// resume a build that never got past "queued" before a restart.
+export function getQueuedBuildsForRecovery() {
   return db.prepare(`
     SELECT
       id,
       project_name AS projectName,
-      status,
-      submitted_at AS submittedAt
+      submitted_at AS submittedAt,
+      job_payload AS jobPayload
     FROM builds
     WHERE status = 'queued'
+    ORDER BY submitted_at ASC
+  `).all();
+}
+
+// Used at API startup to find builds that were mid-build when the API
+// process last stopped, so recovery can check whether their container is
+// still actually running before deciding to reattach or mark them failed.
+export function getBuildingBuilds() {
+  return db.prepare(`
+    SELECT
+      id,
+      project_name AS projectName,
+      submitted_at AS submittedAt,
+      platform
+    FROM builds
+    WHERE status = 'building'
     ORDER BY submitted_at ASC
   `).all();
 }
