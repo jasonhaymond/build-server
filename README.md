@@ -9,7 +9,7 @@ It accepts Android/Expo/React Native source and build configuration,
 builds it in an isolated Docker container, stores the resulting APK/AAB,
 and returns a permanent public download URL.
 
-**Current version:** 0.8.0 — see [CHANGELOG.md](CHANGELOG.md) for release history.
+**Current version:** 0.9.0 — see [CHANGELOG.md](CHANGELOG.md) for release history.
 
 Full architecture, API reference, security model, and the project roadmap
 live in [PROJECT-SCOPE.md](PROJECT-SCOPE.md) — read that first for anything
@@ -24,9 +24,8 @@ production deployment.
 ## Setup (Docker Compose — recommended)
 
 ```bash
-cp .env.example .env
-# edit .env: at minimum set JOB_SECRETS_ENCRYPTION_KEY, HOST_PROJECT_DIR,
-# and DOCKER_GID — see the comments in .env.example for how to generate each.
+node scripts/setup.mjs   # interactive, generates JOB_SECRETS_ENCRYPTION_KEY,
+                          # detects DOCKER_GID, writes .env — safe to re-run
 
 docker build -t build-server-android:latest .   # the Android build image
 docker compose up -d --build                    # the API itself
@@ -49,7 +48,7 @@ its SHA-256 hash is stored. Save it somewhere real before continuing.
 
 ```bash
 npm install
-cp .env.example .env   # HOST_PROJECT_DIR/DOCKER_GID aren't needed outside Compose
+node scripts/setup.mjs   # answer "no" to the Docker Compose prompt
 docker build -t build-server-android:latest .
 node scripts/create-api-key.mjs "some client name"
 npm run api
@@ -96,19 +95,27 @@ can only see/cancel/download its own builds unless it also holds
 ## Deployment
 
 Production runs behind a separate Caddy reverse proxy that terminates TLS.
-Port 8080 must never be exposed directly to the Internet. See
-[docs/deployment.md](docs/deployment.md) for the full first-deploy and
-update walkthrough, and [PROJECT-SCOPE.md](PROJECT-SCOPE.md) for the
-reverse-proxy config, host firewall rules, and architecture.
+Port 8080 must never be exposed directly to the Internet.
+
+```bash
+scripts/update.sh          # snapshot, pull, rebuild, restart, verify — one command
+scripts/update.sh v1.2.3   # or deploy/roll back to a specific tag
+node scripts/backup.mjs    # database + .env snapshot, on demand
+```
+
+See [docs/deployment.md](docs/deployment.md) for the full first-deploy,
+update, backup, and restore walkthrough, and
+[PROJECT-SCOPE.md](PROJECT-SCOPE.md) for the reverse-proxy config, host
+firewall rules, and architecture.
 
 ## Status
 
-Actively-hardening (v0.8.0): persistent build queue with restart recovery,
+Actively-hardening (v0.9.0): persistent build queue with restart recovery,
 artifact metadata, API key scopes, build cancellation, retention cleanup,
 multi-tenant isolation, structured logging, real health checks, Docker
-Compose containerization, and an automated test suite/CI are all in
-place. See PROJECT-SCOPE.md's "Current Known Limitations" section for
-what's still ahead (a web UI, setup/deploy scripts, backups) before
+Compose containerization, an automated test suite/CI, and setup/update/
+backup tooling are all in place. See PROJECT-SCOPE.md's "Current Known
+Limitations" section for what's still ahead (a web UI, chiefly) before
 relying on this for anything beyond internal/trusted use.
 
 ## Running tests

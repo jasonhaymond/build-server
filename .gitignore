@@ -1,11 +1,13 @@
 node_modules/
 
-# Runtime state — never commit build output, uploads, the database, or logs.
+# Runtime state — never commit build output, uploads, the database, logs,
+# or backups (snapshots include the database and .env, both with secrets).
 data/
 builds/
 uploads/
 jobs/
 logs/
+backups/
 
 # Secrets
 .env

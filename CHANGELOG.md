@@ -5,6 +5,47 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.0] - 2026-09-21
+
+### Added
+
+- `scripts/setup.mjs`: interactive, idempotent `.env` setup — prompts for
+  each value with a sensible default, generates
+  `JOB_SECRETS_ENCRYPTION_KEY`, detects the host's Docker group GID, and
+  asks before overwriting an existing `.env`. Never redisplays a
+  previously-generated secret.
+- `scripts/update.sh`: one-command deploy/update/rollback — refuses to run
+  over uncommitted local changes, takes an unconditional pre-update
+  snapshot (`scripts/backup.mjs`), rebuilds and restarts via Docker
+  Compose, and polls `/health` before declaring success. Takes an optional
+  version/tag argument; omitted, it updates to latest.
+- `scripts/backup.mjs`: a consistent SQLite snapshot (`VACUUM INTO`) plus
+  `.env`, packaged as `backups/build-server-vX.Y.Z-<timestamp>.tar.gz` —
+  the manual-fallback backup tier the project standard allows for a
+  smaller project. Named after the version actually recorded in the
+  database, not `package.json` on disk.
+- `app_meta` table (migration `0005`), upserted with the running version
+  on every successful boot (not just deploys) — makes "which snapshot
+  matches which version" answerable by reading the table, independent of
+  whether a backup's filename survived intact.
+- `docs/deployment.md` expanded with the setup/update/backup/restore
+  walkthrough (both the scripted and manual path for each), and an
+  honest restore-recoverability statement (what a restore recovers, how
+  long it takes, what's lost since the last snapshot).
+
+Verified end-to-end: `setup.mjs`'s overwrite guard, default-accepting,
+key-generation-vs-preservation, and both the Compose and non-Compose
+branches; `update.sh`'s uncommitted-changes and missing-`.env` guards in
+an isolated scratch repo; a full real backup → data wipe → restore →
+reboot cycle, confirming the API key and `app_meta` version both survived
+and the restored server actually serves traffic.
+
+Along the way, a genuine Node.js `readline/promises` quirk surfaced and
+was worked around: `question()` can hang on the second call against
+piped/non-TTY stdin on this Node version — `setup.mjs` uses the
+callback-based `readline` API instead, which doesn't have the problem
+and works identically for real interactive use.
+
 ## [0.8.0] - 2026-09-21
 
 ### Added
@@ -260,6 +301,7 @@ through the live HTTP API (submit → building → failed, with the persisted
   unguessable artifact download tokens, and a real Clocker release build
   completed end-to-end through the generic worker.
 
+[0.9.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.9.0
 [0.8.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.8.0
 [0.7.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.7.0
 [0.6.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.6.0

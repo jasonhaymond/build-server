@@ -11,8 +11,8 @@ import {
   readFileSync,
   statSync,
 } from "node:fs";
-import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   createApiKey,
   createBuild,
@@ -25,6 +25,7 @@ import {
   getBuild,
   getBuildMetrics,
   listApiKeys,
+  upsertAppMeta,
 } from "../db/database.mjs";
 import { createLogger } from "../logging/logger.mjs";
 import { serializeJobForQueue } from "../queue/jobPayload.mjs";
@@ -529,9 +530,13 @@ export { app };
 const isMainModule = import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (isMainModule) {
+  const packageJsonPath = resolve(dirname(fileURLToPath(import.meta.url)), "../../package.json");
+  const { version } = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+
+  upsertAppMeta(version);
   reconstructQueueOnStartup();
 
   app.listen(port, () => {
-    logger.info("Build API listening", { port });
+    logger.info("Build API listening", { port, version });
   });
 }

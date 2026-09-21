@@ -397,3 +397,25 @@ export function disableArtifactsForBuild(buildId) {
   db.prepare(`UPDATE artifacts SET enabled = 0 WHERE build_id = ?`).run(buildId);
   db.prepare(`UPDATE artifact_download_tokens SET enabled = 0 WHERE build_id = ?`).run(buildId);
 }
+
+// Upserted on every successful boot (not just deploys), so it reflects
+// what's actually been running rather than what a deploy script assumed —
+// this is what makes a backup's filename traceable to a real running
+// version, and what a restore checks to confirm which version came back.
+export function upsertAppMeta(version) {
+  db.prepare(`
+    INSERT INTO app_meta (id, version, updated_at)
+    VALUES (1, @version, @updatedAt)
+    ON CONFLICT(id) DO UPDATE SET
+      version = excluded.version,
+      updated_at = excluded.updated_at
+  `).run({ version, updatedAt: new Date().toISOString() });
+}
+
+export function getAppMeta() {
+  return db.prepare(`
+    SELECT version, updated_at AS updatedAt
+    FROM app_meta
+    WHERE id = 1
+  `).get();
+}

@@ -1,10 +1,10 @@
 # Deployment
 
 This covers running `build-server` under Docker Compose, which is the
-supported way to run the API in production. It does not yet cover an
-interactive setup script, an update script, or backups — those are planned
-(see PROJECT-SCOPE.md's roadmap) but not built yet. This document will be
-expanded when they land; until then, first-time setup is manual, as below.
+supported way to run the API in production. It gives both the interactive
+setup script's version of each step and the exact manual commands behind
+it — a reader following the manual path ends up in the same place as
+someone who ran the script.
 
 ## Architecture recap
 
@@ -68,7 +68,19 @@ the build server touching are also running, until that hardening lands.
 ```bash
 git clone <this-repo-url> build-server
 cd build-server
+node scripts/setup.mjs
+```
 
+The setup script is interactive and idempotent — it prompts for each value
+below with a sensible default, generates `JOB_SECRETS_ENCRYPTION_KEY` for
+you, detects `DOCKER_GID` automatically where possible, and asks before
+overwriting an existing `.env`. Save the generated key somewhere real when
+it tells you to — it's shown only once and can't be recovered later, only
+rotated (which loses any build still genuinely queued at rotation time).
+
+**Manual equivalent**, if you'd rather not run the script:
+
+```bash
 cp .env.example .env
 ```
 
@@ -96,8 +108,8 @@ Edit `.env`:
 - `ALLOW_LOCAL_GIT_SOURCES` — leave `false` unless this deployment is
   trusted/internal-only.
 
-Build the Android build image (the isolated per-build environment, not the
-API itself) and bring up the API:
+**Both paths continue the same way** — build the Android build image (the
+isolated per-build environment, not the API itself) and bring up the API:
 
 ```bash
 docker build -t build-server-android:latest .
@@ -123,14 +135,26 @@ host, per PROJECT-SCOPE.md's Caddy example.
 
 ## Updating
 
-There's no dedicated update script yet. Until one exists:
+```bash
+scripts/update.sh              # update to the latest commit on this branch
+scripts/update.sh v1.2.3       # or deploy/roll back to a specific tag
+```
+
+The script refuses to run over uncommitted local changes, takes a database
++ `.env` snapshot first (`scripts/backup.mjs`) regardless of any other
+backup schedule, rebuilds the Android image, restarts the API via Compose,
+and polls `/health` before declaring success.
+
+**Manual equivalent:**
 
 ```bash
 cd build-server
-git status              # make sure there's nothing uncommitted to lose
-git pull                # or: git checkout vX.Y.Z for a specific version
-docker build -t build-server-android:latest .   # if the build image changed
-docker compose up -d --build
+git status                                      # nothing uncommitted to lose
+node scripts/backup.mjs                         # snapshot first, always
+git pull                                        # or: git checkout vX.Y.Z
+docker build -t build-server-android:latest .
+docker compose build
+docker compose up -d
 curl http://localhost:${PORT:-8080}/health
 ```
 
@@ -140,12 +164,79 @@ SQLite migrations run automatically on API startup
 ## Rolling back
 
 Docker Compose containerization has no down-migrations (per this project's
-migration standard). Rolling back code (`git checkout vX.Y.Z` followed by
-the update steps above) is always safe. Rolling back the **database** to
-match an older code version is not — if a migration since that version
-dropped, renamed, or tightened a constraint on existing data, old code will
-break against the current schema, and there is currently no automated
-snapshot/restore tooling to fall back on. This is a known gap; backups and
-version-stamped snapshots are planned but not built yet (see
-PROJECT-SCOPE.md's roadmap and the global Backups standard this project
-otherwise follows).
+migration standard). Rolling back **code** (`scripts/update.sh vX.Y.Z`) is
+always safe and fully reproducible. Rolling back the **database** to match
+an older code version is not — if a migration since that version dropped,
+renamed, or tightened a constraint on existing data, old code will break
+against the current schema, and the only real fix is restoring the
+database snapshot taken around that older version's original deploy (see
+Backups below). That restore **discards any data created since**, which is
+a real trade-off, not a formality. If nothing schema-relevant changed
+between the two versions, old code runs fine against the current database
+and there's nothing more to do.
+
+`scripts/update.sh` always takes the unconditional pre-update snapshot;
+whether you also need the database-rollback step is something you decide
+after checking what changed, not something the script guesses for you.
+
+## Backups
+
+```bash
+node scripts/backup.mjs
+```
+
+This is the manual-fallback tier the project's backup standard allows for
+a smaller project (a full encrypted/deduplicated setup like BorgBackup is
+the eventual target for anything with a retention policy, not built yet).
+It:
+
+- Takes a consistent SQLite snapshot (`VACUUM INTO`, safe against a live
+  database) plus a copy of `.env` — the database alone isn't enough to
+  recover, since `.env` holds secrets that aren't in git.
+- Names the archive after the version actually recorded in the database's
+  `app_meta` table (upserted on every successful boot, not just deploys),
+  not `package.json` on disk — `backups/build-server-vX.Y.Z-<timestamp>.tar.gz`.
+- Is also run automatically, unconditionally, by `scripts/update.sh`
+  before every update — independent of whatever scheduled backup you set
+  up separately (e.g. a cron job calling `node scripts/backup.mjs`).
+
+**This only protects you if the backups leave the host.** Copy the
+`backups/` directory off-host (a separate backup server over SSH, object
+storage, etc.) — a backup on the same disk as the database doesn't survive
+that disk failing.
+
+### Restoring
+
+```bash
+tar -xzf backups/build-server-vX.Y.Z-<timestamp>.tar.gz -C /tmp/restore
+docker compose down            # or: stop the non-Compose process
+cp /tmp/restore/build-server.db data/build-server.db
+cp /tmp/restore/.env .env
+docker compose up -d
+curl http://localhost:${PORT:-8080}/health
+```
+
+After restoring, confirm which version actually came back by reading
+`app_meta` directly rather than trusting the archive's filename (which
+survives fine here, but wouldn't if renamed):
+
+```bash
+docker compose exec api node -e "
+const { getAppMeta } = require('./src/db/database.mjs');
+console.log(getAppMeta());
+"
+```
+
+This restore path has been exercised end-to-end (real backup → wipe →
+restore → boot → verified API key and `app_meta` survived), not just
+assumed to work.
+
+**Recoverability**: a restore brings back the database exactly as of the
+snapshot and takes under a minute for a database this size. Data created
+between that snapshot and the failure is lost — the RPO is however often
+you actually run `scripts/backup.mjs` on a schedule (cron) plus whatever
+`scripts/update.sh` captured on the last update. There's no scheduled
+backup wired up by default yet; add one (e.g. a nightly cron calling
+`node scripts/backup.mjs`, followed by copying `backups/` off-host) if
+this deployment holds anything you can't afford to lose since the last
+manual run.
