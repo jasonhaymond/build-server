@@ -1,6 +1,9 @@
 import { spawn } from "node:child_process";
 import { updateBuild } from "../db/database.mjs";
+import { createLogger } from "../logging/logger.mjs";
 import { serializeJobMasked } from "./jobPayload.mjs";
+
+const logger = createLogger("queue");
 
 // Single shared, single-process queue state. Deliberately plain mutable
 // state rather than a class/getter API — this process only ever runs one
@@ -67,7 +70,7 @@ export function processQueue() {
     jobPayload: serializeJobMasked(build.job),
   });
 
-  console.log(`Starting build: ${id}`);
+  logger.info("Starting build", { id });
 
   const worker = spawn(
     "node",
@@ -82,7 +85,7 @@ export function processQueue() {
   worker.stdin.end();
 
   worker.on("error", (error) => {
-    console.error(`Worker failed to start for ${id}:`, error);
+    logger.error("Worker failed to start", { id, error: error.message });
 
     const completedAt = new Date().toISOString();
 
@@ -106,6 +109,7 @@ export function processQueue() {
   worker.on("close", (code) => {
     const completedAt = new Date().toISOString();
     const exitCode = code ?? 1;
+    const durationMs = Date.now() - Date.parse(startedAt);
 
     build.exitCode = exitCode;
     build.completedAt = completedAt;
@@ -117,10 +121,11 @@ export function processQueue() {
         status: "cancelled",
         completedAt,
         exitCode,
+        durationMs,
         cancellationState: "cancelled",
       });
 
-      console.log(`Build cancelled: ${id}`);
+      logger.info("Build cancelled", { id });
     } else if (exitCode === 0) {
       build.status = "completed";
 
@@ -128,9 +133,10 @@ export function processQueue() {
         status: "completed",
         completedAt,
         exitCode,
+        durationMs,
       });
 
-      console.log(`Build completed: ${id}`);
+      logger.info("Build completed", { id, durationMs });
     } else {
       build.status = "failed";
 
@@ -138,11 +144,10 @@ export function processQueue() {
         status: "failed",
         completedAt,
         exitCode,
+        durationMs,
       });
 
-      console.error(
-        `Build failed: ${id} (exit code ${exitCode})`,
-      );
+      logger.error("Build failed", { id, exitCode, durationMs });
     }
 
     queueState.activeBuild = false;

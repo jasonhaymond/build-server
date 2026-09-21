@@ -22,14 +22,17 @@ import {
   getArtifactDownloadToken,
   getArtifactsForBuild,
   getBuild,
+  getBuildMetrics,
   listApiKeys,
 } from "../db/database.mjs";
+import { createLogger } from "../logging/logger.mjs";
 import { serializeJobForQueue } from "../queue/jobPayload.mjs";
 import { cancelQueuedBuild, processQueue, queueState } from "../queue/queue.mjs";
 import { reconstructQueueOnStartup } from "../queue/recovery.mjs";
 import { encryptSecrets } from "../security/secrets.mjs";
 import { KNOWN_SCOPES, hasScope, parseScopes, serializeScopes } from "../security/scopes.mjs";
 
+const logger = createLogger("api");
 const app = express();
 const port = Number(process.env.PORT ?? 8080);
 const publicBaseUrl = (
@@ -158,11 +161,32 @@ function sanitizeBuildForResponse(build) {
 }
 
 app.get("/health", (req, res) => {
-  res.json({
-    status: "ok",
+  const checks = { database: "ok", docker: "ok" };
+  let healthy = true;
+
+  try {
+    getBuild("__healthcheck__");
+  } catch (error) {
+    checks.database = `error: ${error.message}`;
+    healthy = false;
+  }
+
+  try {
+    execFileSync("docker", ["info", "--format", "{{.ServerVersion}}"], {
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 3000,
+    });
+  } catch (error) {
+    checks.docker = `error: ${error.message}`;
+    healthy = false;
+  }
+
+  res.status(healthy ? 200 : 503).json({
+    status: healthy ? "ok" : "degraded",
     service: "build-server",
     activeBuild: queueState.activeBuild,
     queuedBuilds: queueState.buildQueue.length,
+    checks,
   });
 });
 
@@ -214,7 +238,7 @@ app.post("/api/v1/builds", requireScope("build:create"), (req, res) => {
 
   queueState.buildQueue.push(id);
 
-  console.log(`Build queued: ${id}`);
+  logger.info("Build queued", { id });
 
   processQueue();
 
@@ -289,7 +313,7 @@ app.post("/api/v1/builds/:id/cancel", requireBuildAccess("build:cancel"), (req, 
   }
 
   if (cancelQueuedBuild(build.id)) {
-    console.log(`Build cancelled (was queued): ${build.id}`);
+    logger.info("Build cancelled (was queued)", { id: build.id });
     return res.json({ id: build.id, status: "cancelled" });
   }
 
@@ -431,6 +455,10 @@ app.delete("/api/v1/api-keys/:id", requireScope("api-key:manage"), (req, res) =>
   return res.json({ id: key.id, enabled: false });
 });
 
+app.get("/api/v1/metrics", requireScope("metrics:read"), (req, res) => {
+  return res.json(getBuildMetrics());
+});
+
 app.get("/download/:token/:filename", (req, res) => {
   const { token, filename } = req.params;
 
@@ -495,5 +523,5 @@ app.get("/download/:token/:filename", (req, res) => {
 reconstructQueueOnStartup();
 
 app.listen(port, () => {
-  console.log(`Build API listening on port ${port}`);
+  logger.info("Build API listening", { port });
 });

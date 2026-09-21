@@ -5,6 +5,32 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] - 2026-09-21
+
+### Added
+
+- Structured JSON-line logging (`src/logging/logger.mjs`): the API process
+  (`server.mjs`, `src/queue/queue.mjs`, `src/queue/recovery.mjs`) now logs
+  `{ts, level, source, msg, ...}` to stdout and a rotating `logs/api.log`
+  (simple size-based rotation, one backup), redacting any field whose key
+  matches `secret`/`token`/`key`. The worker's own per-build `build.log`
+  is unchanged — it serves a different purpose (build output for the
+  caller, not API operations).
+- `/health` now actually checks its dependencies instead of just
+  confirming the process is up: a real SQLite query and a `docker info`
+  call (3s timeout), returning `503`/`"degraded"` with a `checks` object
+  naming which dependency failed if either is unreachable.
+- `GET /api/v1/metrics` (new `metrics:read` scope): build counts by
+  status, average build duration, and sample count. No alerting — just
+  the hook, per the monitoring standard.
+- Builds now record `duration_ms` (started → completed/failed/cancelled),
+  computed at every completion path including restart-reattached builds.
+
+Verified against a live server: health check reports real dependency
+status, metrics correctly aggregate a real completed build's duration,
+the `metrics:read` scope is enforced (403 without it), and logged secret-
+like fields are redacted to `***` while other fields pass through.
+
 ## [0.5.0] - 2026-09-21
 
 ### Added
@@ -155,6 +181,7 @@ through the live HTTP API (submit → building → failed, with the persisted
   unguessable artifact download tokens, and a real Clocker release build
   completed end-to-end through the generic worker.
 
+[0.6.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.6.0
 [0.5.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.5.0
 [0.4.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.4.0
 [0.3.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.3.0

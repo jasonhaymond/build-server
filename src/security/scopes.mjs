@@ -11,6 +11,7 @@ export const KNOWN_SCOPES = [
   "artifact:download",
   "artifact:manage",
   "api-key:manage",
+  "metrics:read",
 ];
 
 export function parseScopes(scopesColumn) {

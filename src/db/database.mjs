@@ -159,11 +159,32 @@ export function getBuildingBuilds() {
       id,
       project_name AS projectName,
       submitted_at AS submittedAt,
+      started_at AS startedAt,
       platform
     FROM builds
     WHERE status = 'building'
     ORDER BY submitted_at ASC
   `).all();
+}
+
+export function getBuildMetrics() {
+  const byStatus = db.prepare(`
+    SELECT status, COUNT(*) AS count
+    FROM builds
+    GROUP BY status
+  `).all();
+
+  const duration = db.prepare(`
+    SELECT AVG(duration_ms) AS avgDurationMs, COUNT(*) AS sampleCount
+    FROM builds
+    WHERE duration_ms IS NOT NULL
+  `).get();
+
+  return {
+    buildsByStatus: Object.fromEntries(byStatus.map((row) => [row.status, row.count])),
+    averageDurationMs: duration.avgDurationMs ?? null,
+    durationSampleCount: duration.sampleCount,
+  };
 }
 
 export function createApiKey({

@@ -7,11 +7,13 @@ import {
   getQueuedBuildsForRecovery,
   updateBuild,
 } from "../db/database.mjs";
+import { createLogger } from "../logging/logger.mjs";
 import { deserializeJobFromQueue } from "./jobPayload.mjs";
 import { processQueue, queueState } from "./queue.mjs";
 
 const serverDir = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const buildsDir = resolve(serverDir, "builds");
+const logger = createLogger("recovery");
 
 function containerNameFor(platform, id) {
   return `build-${platform}-${id}`;
@@ -50,7 +52,7 @@ function markInterrupted(id, reason) {
 function reattachBuildingBuild(row) {
   const name = containerNameFor(row.platform, row.id);
 
-  console.log(`Reattaching to running build: ${row.id} (${name})`);
+  logger.info("Reattaching to running build", { id: row.id, container: name });
 
   queueState.activeBuild = true;
 
@@ -76,13 +78,14 @@ function reattachBuildingBuild(row) {
   wait.on("close", () => {
     const exitCode = Number.parseInt(waitOutput.trim(), 10) || 0;
     const completedAt = new Date().toISOString();
+    const durationMs = row.startedAt ? Date.now() - Date.parse(row.startedAt) : null;
 
     if (exitCode === 0) {
-      updateBuild(row.id, { status: "completed", completedAt, exitCode });
-      console.log(`Reattached build completed: ${row.id}`);
+      updateBuild(row.id, { status: "completed", completedAt, exitCode, durationMs });
+      logger.info("Reattached build completed", { id: row.id, durationMs });
     } else {
-      updateBuild(row.id, { status: "failed", completedAt, exitCode });
-      console.error(`Reattached build failed: ${row.id} (exit code ${exitCode})`);
+      updateBuild(row.id, { status: "failed", completedAt, exitCode, durationMs });
+      logger.error("Reattached build failed", { id: row.id, exitCode, durationMs });
     }
 
     queueState.activeBuild = false;
@@ -90,7 +93,7 @@ function reattachBuildingBuild(row) {
   });
 
   wait.on("error", (error) => {
-    console.error(`Lost track of reattached build ${row.id}: ${error.message}`);
+    logger.error("Lost track of reattached build", { id: row.id, error: error.message });
     markInterrupted(row.id, `Lost track of build after restart: ${error.message}`);
     queueState.activeBuild = false;
     processQueue();
@@ -104,7 +107,7 @@ export function reconstructQueueOnStartup() {
     if (row.platform && isContainerRunning(containerNameFor(row.platform, row.id))) {
       reattachBuildingBuild(row);
     } else {
-      console.error(`Build interrupted by restart (no running container found): ${row.id}`);
+      logger.error("Build interrupted by restart (no running container found)", { id: row.id });
       markInterrupted(row.id, "Interrupted by server restart");
     }
   }
@@ -139,7 +142,7 @@ export function reconstructQueueOnStartup() {
   }
 
   if (requeued > 0) {
-    console.log(`Reconstructed ${requeued} queued build(s) from the database.`);
+    logger.info("Reconstructed queued builds from the database", { count: requeued });
   }
 
   processQueue();
