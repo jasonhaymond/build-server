@@ -189,6 +189,61 @@ export function getBuildMetrics() {
   };
 }
 
+export function countUsers() {
+  return db.prepare(`SELECT COUNT(*) AS count FROM users`).get().count;
+}
+
+export function createUser({ username, passwordHash, role, createdAt }) {
+  return db.prepare(`
+    INSERT INTO users (
+      username,
+      password_hash,
+      role,
+      created_at
+    )
+    VALUES (
+      @username,
+      @passwordHash,
+      @role,
+      @createdAt
+    )
+  `).run({ username, passwordHash, role, createdAt });
+}
+
+export function getUserByUsername(username) {
+  return db.prepare(`
+    SELECT
+      id,
+      username,
+      password_hash AS passwordHash,
+      role,
+      totp_secret AS totpSecret,
+      totp_enabled AS totpEnabled,
+      enabled,
+      created_at AS createdAt,
+      last_login_at AS lastLoginAt
+    FROM users
+    WHERE username = ?
+  `).get(username);
+}
+
+export function getUserById(id) {
+  return db.prepare(`
+    SELECT
+      id,
+      username,
+      password_hash AS passwordHash,
+      role,
+      totp_secret AS totpSecret,
+      totp_enabled AS totpEnabled,
+      enabled,
+      created_at AS createdAt,
+      last_login_at AS lastLoginAt
+    FROM users
+    WHERE id = ?
+  `).get(id);
+}
+
 export function createApiKey({
   name,
   keyHash,

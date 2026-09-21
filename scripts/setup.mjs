@@ -15,17 +15,21 @@ import { fileURLToPath } from "node:url";
 const serverDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const envPath = resolve(serverDir, ".env");
 
-// readline/promises' question() hangs on the second call against
-// non-TTY/piped stdin on some Node versions — the callback API doesn't
-// have that problem, so it's wrapped here instead.
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-  terminal: false,
-});
+// Reads prompts via the readline interface's own async iterator rather
+// than rl.question(). question()'s once('line')-per-call pairing can
+// silently misalign answers when multiple lines are already buffered on
+// piped/non-TTY stdin before the next question() call registers its
+// listener — confirmed reproducible on Node 24 (readline/promises has an
+// even worse version of this, hanging outright; the callback API doesn't
+// hang, but isn't safe either). The async iterator has no such race: it
+// queues incoming lines and yields them in order regardless of timing.
+const rl = readline.createInterface({ input: process.stdin, terminal: false });
+const stdinLines = rl[Symbol.asyncIterator]();
 
-function rlQuestion(prompt) {
-  return new Promise((resolvePromise) => rl.question(prompt, resolvePromise));
+async function rlQuestion(prompt) {
+  process.stdout.write(prompt);
+  const { value, done } = await stdinLines.next();
+  return done ? "" : value;
 }
 
 async function ask(question, defaultValue) {
