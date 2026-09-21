@@ -1,27 +1,22 @@
-// build:read:any isn't one of PROJECT-SCOPE.md's listed scopes — it's the
-// admin-style escape hatch multi-tenant isolation needs so at least one
-// kind of key can see across clients (support/ops use), distinct from the
-// plain build:read every regular key gets scoped to its own builds with.
-// It's a single ownership-bypass flag that applies across every build-
-// scoped route (read, logs, artifacts, cancel) — requireBuildAccess checks
-// it regardless of which specific action scope the route also requires.
-// An admin key needs both, e.g. ["build:read", "build:read:any"]: the
-// first says it may read builds at all, the second says whose.
+// Scopes assignable to an API key — deliberately a *narrower* set than
+// what a signed-in session can do (src/api/server.mjs's requireScope
+// grants a session full access to its own workspace unconditionally,
+// with no per-key scoping at all, since that's what API keys are for).
+// Three scopes that existed pre-v2.0.0 are gone entirely, not just
+// unassignable: `build:read:any` (an admin cross-tenant bypass —
+// removed for absolute per-user isolation, no exceptions), and
+// `system:manage`/`api-key:manage` (server updates/backups and API-key
+// lifecycle are now pure session+role checks, requireAdmin/session-only,
+// never satisfiable via a Bearer key — a leaked CI key can no longer
+// trigger a server update or mint more keys).
 export const KNOWN_SCOPES = [
   "build:create",
   "build:read",
-  "build:read:any",
   "build:logs",
   "build:cancel",
   "artifact:download",
   "artifact:manage",
-  "api-key:manage",
   "metrics:read",
-  // Version/update visibility and the update-trigger button, plus the
-  // operational (not per-build) log viewer — deliberately one scope
-  // covering all "manage this deployment" admin-panel actions, distinct
-  // from api-key:manage (which is specifically about key lifecycle).
-  "system:manage",
 ];
 
 export function parseScopes(scopesColumn) {

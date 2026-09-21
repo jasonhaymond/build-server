@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import request from "supertest";
 import { app } from "../src/api/server.mjs";
-import { createTestApiKey, sampleJob } from "./helpers.mjs";
+import { createTestApiKey, createTestSession, sampleJob } from "./helpers.mjs";
 
 describe("authentication", () => {
   it("rejects requests with no Authorization header", async () => {
@@ -34,12 +34,22 @@ describe("authentication", () => {
 
 describe("GET /api/v1/whoami", () => {
   it("accepts any valid key regardless of scopes", async () => {
-    const key = createTestApiKey({ name: "admin-only", scopes: ["system:manage"] });
+    const key = createTestApiKey({ name: "logs-only", scopes: ["build:logs"] });
     const res = await request(app).get("/api/v1/whoami").set("Authorization", `Bearer ${key}`);
 
     expect(res.status).toBe(200);
-    expect(res.body.name).toBe("admin-only");
-    expect(res.body.scopes).toEqual(["system:manage"]);
+    expect(res.body.name).toBe("logs-only");
+    expect(res.body.scopes).toEqual(["build:logs"]);
+    expect(res.body.authMethod).toBe("apiKey");
+  });
+
+  it("also works for a signed-in session", async () => {
+    const { cookie } = createTestSession({ role: "user" });
+    const res = await request(app).get("/api/v1/whoami").set("Cookie", cookie);
+
+    expect(res.status).toBe(200);
+    expect(res.body.role).toBe("user");
+    expect(res.body.authMethod).toBe("session");
   });
 });
 
@@ -161,10 +171,6 @@ describe("scopes", () => {
 });
 
 describe("multi-tenant isolation", () => {
-  // Isolation only applies between scoped keys — an unscoped ("legacy
-  // full access") key intentionally keeps its pre-existing ability to see
-  // any build, since that's the behavior it had before multi-tenancy
-  // existed (see hasScope's null-scopes handling).
   const scopedKeyScopes = ["build:create", "build:read", "build:cancel"];
 
   it("a build is invisible to a different API key", async () => {
@@ -194,12 +200,13 @@ describe("multi-tenant isolation", () => {
     expect(crossCancel.status).toBe(404);
   });
 
-  it("a key with build:read + build:read:any can see another key's build", async () => {
+  // v2.0.0 removed build:read:any entirely — isolation is absolute now,
+  // with no cross-tenant bypass of any kind, not even for a full-access
+  // key or an admin session (see tests/isolation.test.mjs for the fuller
+  // per-user-account version of this same guarantee).
+  it("no scope combination lets one key see another key's build", async () => {
     const keyA = createTestApiKey({ name: "tenant-c" });
-    const adminKey = createTestApiKey({
-      name: "admin",
-      scopes: ["build:read", "build:read:any"],
-    });
+    const fullAccessKey = createTestApiKey({ name: "full-access" });
 
     const submit = await request(app)
       .post("/api/v1/builds")
@@ -208,11 +215,26 @@ describe("multi-tenant isolation", () => {
 
     const id = submit.body.id;
 
-    const adminRead = await request(app)
+    const crossRead = await request(app)
       .get(`/api/v1/builds/${id}`)
-      .set("Authorization", `Bearer ${adminKey}`);
+      .set("Authorization", `Bearer ${fullAccessKey}`);
 
-    expect(adminRead.status).toBe(200);
-    expect(adminRead.body.id).toBe(id);
+    expect(crossRead.status).toBe(404);
+  });
+
+  it("an admin session cannot see a build submitted by an API key", async () => {
+    const keyA = createTestApiKey({ name: "tenant-d" });
+    const { cookie } = createTestSession({ role: "admin" });
+
+    const submit = await request(app)
+      .post("/api/v1/builds")
+      .set("Authorization", `Bearer ${keyA}`)
+      .send(sampleJob());
+
+    const id = submit.body.id;
+
+    const adminRead = await request(app).get(`/api/v1/builds/${id}`).set("Cookie", cookie);
+
+    expect(adminRead.status).toBe(404);
   });
 });

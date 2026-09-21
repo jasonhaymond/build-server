@@ -26,14 +26,14 @@ describe("checkAndConsume", () => {
 
   it("allows again once the window has passed", () => {
     const key = `test-${Math.random()}`;
-    expect(checkAndConsume(key, { max: 1, windowMs: 1 })).toBe(true);
-    expect(checkAndConsume(key, { max: 1, windowMs: 1 })).toBe(false);
+    expect(checkAndConsume(key, { max: 1, windowMs: 50 })).toBe(true);
+    expect(checkAndConsume(key, { max: 1, windowMs: 50 })).toBe(false);
 
     return new Promise((resolve) => {
       setTimeout(() => {
-        expect(checkAndConsume(key, { max: 1, windowMs: 1 })).toBe(true);
+        expect(checkAndConsume(key, { max: 1, windowMs: 50 })).toBe(true);
         resolve();
-      }, 10);
+      }, 100);
     });
   });
 });

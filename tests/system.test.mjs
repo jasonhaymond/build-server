@@ -4,38 +4,45 @@ import { describe, expect, it } from "vitest";
 import request from "supertest";
 import { app } from "../src/api/server.mjs";
 import { buildUpdateRunnerArgs } from "../src/system/update.mjs";
-import { createTestApiKey } from "./helpers.mjs";
+import { createTestApiKey, createTestSession } from "./helpers.mjs";
 
 describe("GET /api/v1/system", () => {
-  it("requires system:manage", async () => {
-    const key = createTestApiKey({ scopes: ["build:read"] });
+  it("requires admin sign-in — a non-admin session is refused", async () => {
+    const { cookie } = createTestSession({ role: "user" });
+    const res = await request(app).get("/api/v1/system").set("Cookie", cookie);
+    expect(res.status).toBe(403);
+  });
+
+  it("requires admin sign-in — a full-access API key is refused (session-only)", async () => {
+    const key = createTestApiKey();
     const res = await request(app).get("/api/v1/system").set("Authorization", `Bearer ${key}`);
     expect(res.status).toBe(403);
   });
 
-  it("returns version and queue status", async () => {
-    const key = createTestApiKey({ scopes: ["system:manage"] });
-    const res = await request(app).get("/api/v1/system").set("Authorization", `Bearer ${key}`);
+  it("returns version and queue status for an admin session", async () => {
+    const { cookie } = createTestSession({ role: "admin" });
+    const res = await request(app).get("/api/v1/system").set("Cookie", cookie);
 
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty("version");
     expect(res.body).toHaveProperty("activeBuild");
     expect(res.body).toHaveProperty("queuedBuilds");
+    expect(res.body).toHaveProperty("totalBuildsAllUsers");
     // No GITHUB_REPO set in the test env — degrades gracefully.
     expect(res.body.checked).toBe(false);
   });
 });
 
 describe("GET /api/v1/system/logs", () => {
-  it("requires system:manage", async () => {
-    const key = createTestApiKey({ scopes: ["build:read"] });
-    const res = await request(app).get("/api/v1/system/logs").set("Authorization", `Bearer ${key}`);
+  it("requires admin sign-in", async () => {
+    const { cookie } = createTestSession({ role: "user" });
+    const res = await request(app).get("/api/v1/system/logs").set("Cookie", cookie);
     expect(res.status).toBe(403);
   });
 
-  it("returns a list of log entries", async () => {
-    const key = createTestApiKey({ scopes: ["system:manage"] });
-    const res = await request(app).get("/api/v1/system/logs").set("Authorization", `Bearer ${key}`);
+  it("returns a list of log entries for an admin session", async () => {
+    const { cookie } = createTestSession({ role: "admin" });
+    const res = await request(app).get("/api/v1/system/logs").set("Cookie", cookie);
 
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.entries)).toBe(true);
@@ -43,15 +50,21 @@ describe("GET /api/v1/system/logs", () => {
 });
 
 describe("POST /api/v1/system/update", () => {
-  it("requires system:manage", async () => {
-    const key = createTestApiKey({ scopes: ["build:read"] });
-    const res = await request(app).post("/api/v1/system/update").set("Authorization", `Bearer ${key}`);
+  it("requires admin sign-in", async () => {
+    const { cookie, csrfToken } = createTestSession({ role: "user" });
+    const res = await request(app)
+      .post("/api/v1/system/update")
+      .set("Cookie", cookie)
+      .set("X-CSRF-Token", csrfToken);
     expect(res.status).toBe(403);
   });
 
   it("refuses when HOST_PROJECT_DIR/API_IMAGE aren't set (not a Compose deployment)", async () => {
-    const key = createTestApiKey({ scopes: ["system:manage"] });
-    const res = await request(app).post("/api/v1/system/update").set("Authorization", `Bearer ${key}`);
+    const { cookie, csrfToken } = createTestSession({ role: "admin" });
+    const res = await request(app)
+      .post("/api/v1/system/update")
+      .set("Cookie", cookie)
+      .set("X-CSRF-Token", csrfToken);
 
     // The test environment never sets HOST_PROJECT_DIR/API_IMAGE, so this
     // exercises the real refusal path rather than actually spawning a
@@ -59,12 +72,22 @@ describe("POST /api/v1/system/update", () => {
     expect(res.status).toBe(409);
     expect(res.body.error).toMatch(/HOST_PROJECT_DIR/);
   });
+
+  it("rejects a mutating request from a real session with no/wrong CSRF token", async () => {
+    const { cookie } = createTestSession({ role: "admin" });
+    const res = await request(app).post("/api/v1/system/update").set("Cookie", cookie);
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/CSRF/);
+  });
 });
 
 describe("POST /api/v1/system/backup", () => {
-  it("requires system:manage", async () => {
-    const key = createTestApiKey({ scopes: ["build:read"] });
-    const res = await request(app).post("/api/v1/system/backup").set("Authorization", `Bearer ${key}`);
+  it("requires admin sign-in", async () => {
+    const { cookie, csrfToken } = createTestSession({ role: "user" });
+    const res = await request(app)
+      .post("/api/v1/system/backup")
+      .set("Cookie", cookie)
+      .set("X-CSRF-Token", csrfToken);
     expect(res.status).toBe(403);
   });
 
@@ -75,8 +98,11 @@ describe("POST /api/v1/system/backup", () => {
   // was independently verified working end to end on a real Linux
   // container. Skipped on Windows dev machines only, not on CI.
   it.skipIf(process.platform === "win32")("creates a real backup archive", async () => {
-    const key = createTestApiKey({ scopes: ["system:manage"] });
-    const res = await request(app).post("/api/v1/system/backup").set("Authorization", `Bearer ${key}`);
+    const { cookie, csrfToken } = createTestSession({ role: "admin" });
+    const res = await request(app)
+      .post("/api/v1/system/backup")
+      .set("Cookie", cookie)
+      .set("X-CSRF-Token", csrfToken);
 
     expect(res.status).toBe(201);
     expect(res.body.archivePath).toMatch(/build-server-v.*\.tar\.gz$/);
