@@ -1,0 +1,17 @@
+# Serves web/ locally on the build-server host itself — not the public
+# Internet-facing Caddy. That separate, public Caddy instance (a
+# different host; see docs/caddy-setup.md) reverse_proxys to this one
+# over the LAN, exactly like it does for the API. No hostname here means
+# no automatic-HTTPS/ACME attempt — this is a plain, LAN-internal HTTP
+# service, same trust tier as the API's own $PORT.
+:80 {
+    root * /srv/web
+    file_server
+
+    # This is a hand-authored static site with no build step and no
+    # versioned/hashed filenames — a stale cached app.js after an update
+    # could silently run old code against a new API. no-cache forces a
+    # cheap revalidation request every load instead of serving a stale
+    # copy; for a handful of small files this costs nothing noticeable.
+    header Cache-Control "no-cache"
+}

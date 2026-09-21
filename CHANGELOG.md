@@ -5,6 +5,36 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-09-21
+
+### Changed
+
+- **The web UI is now served from the build-server host itself**, not
+  copied to the separate public-facing Caddy host. A new opt-in `web`
+  Docker Compose service (`docker compose --profile web up -d --build`,
+  new `Caddyfile.web`) serves `web/` locally on `WEB_PORT` (default
+  `8081`), right next to the API — the public Caddy now `reverse_proxy`s
+  to it for the web UI route exactly the same way it already does for the
+  API route, instead of running its own `file_server` against a copied
+  directory. This removes the earlier rsync-to-the-proxy-host step
+  entirely and means a `git pull`/`scripts/update.sh` updates the live
+  web UI immediately via the service's bind mount, with no separate
+  deploy step.
+- `scripts/setup.mjs` now prompts to deploy the web UI, picks `WEB_PORT`
+  with the same conflict-checked flow as `PORT`, and fixes a latent bug
+  where `choosePort()`'s prompt label was hardcoded (harmless while only
+  ever called once, but would have mislabeled the new `WEB_PORT` prompt).
+- `docs/caddy-setup.md` rewritten around this architecture (all Caddyfile
+  examples re-validated with `caddy validate`); `docs/deployment.md` and
+  `README.md` updated to match.
+
+Verified with a real Docker Compose deployment: `--profile web up -d
+--build` brings up both services; the web UI serves `index.html` with
+`Cache-Control: no-cache` on `WEB_PORT`; a plain `docker compose up -d`
+(no `--profile web`) leaves an already-running `web` container
+completely untouched, confirming `scripts/update.sh` needs no changes
+for it.
+
 ## [1.1.0] - 2026-09-21
 
 ### Added

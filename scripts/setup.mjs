@@ -68,8 +68,8 @@ function isPortInUse(port) {
 // Only a NEW deployment (or picking a different port than what's already
 // recorded) needs this check — a port this same deployment already owns
 // from a prior run isn't a conflict, it's just itself.
-async function choosePort(defaultPort, isNewPort) {
-  let port = await ask("Port the API listens on", defaultPort);
+async function choosePort(label, defaultPort, isNewPort) {
+  let port = await ask(label, defaultPort);
 
   if (!isNewPort(port)) {
     return port;
@@ -117,6 +117,7 @@ console.log("=== build-server setup ===");
 console.log("");
 
 const port = await choosePort(
+  "Port the API listens on",
   existing.PORT ?? "8080",
   (candidate) => candidate !== existing.PORT,
 );
@@ -189,6 +190,34 @@ if (useCompose) {
     console.log("Warning: could not determine DOCKER_GID automatically (getent not found or");
     console.log("no docker group). Set it manually in .env before running docker compose up —");
     console.log("find it with: getent group docker | cut -d: -f3");
+  }
+
+  const deployWebUi = await askYesNo(
+    "Deploy the web UI too? (served from this host, right next to the API — see docs/caddy-setup.md)",
+    Boolean(existing.WEB_UI_ORIGIN),
+  );
+
+  if (deployWebUi) {
+    const webPort = await choosePort(
+      "Port the web UI's static file server listens on",
+      existing.WEB_PORT ?? "8081",
+      (candidate) => candidate !== existing.WEB_PORT,
+    );
+    const webUiOrigin = await ask(
+      "Public origin the web UI will be served at (for CORS — scheme + host, no trailing slash)",
+      existing.WEB_UI_ORIGIN ?? "https://builds.example.com",
+    );
+
+    lines.push(
+      "",
+      "# Web UI (optional — the `web` Compose service, --profile web)",
+      `WEB_PORT=${webPort}`,
+      `WEB_UI_ORIGIN=${webUiOrigin}`,
+    );
+
+    console.log("");
+    console.log("Remember: the web service is opt-in (Compose profile 'web') — bring it up with:");
+    console.log("  docker compose --profile web up -d --build");
   }
 }
 

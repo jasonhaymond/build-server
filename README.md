@@ -9,7 +9,7 @@ It accepts Android/Expo/React Native source and build configuration,
 builds it in an isolated Docker container, stores the resulting APK/AAB,
 and returns a permanent public download URL.
 
-**Current version:** 1.0.0 — see [CHANGELOG.md](CHANGELOG.md) for release history.
+**Current version:** 1.2.0 — see [CHANGELOG.md](CHANGELOG.md) for release history.
 
 Architecture rationale, the source/build request schema, and the security
 model live in [PROJECT-SCOPE.md](PROJECT-SCOPE.md) (the original handoff
@@ -126,9 +126,13 @@ architecture.
 
 `web/` is a plain static dashboard (no build step) — submit builds, watch
 status, view logs and artifacts, cancel a running build. It's served by
-Caddy as its own site, separate from the API, so it needs `WEB_UI_ORIGIN`
-set in `.env` for CORS. Sign-in is a manually-pasted API key kept only in
-that browser tab's session storage.
+its own `web` Compose service (`docker compose --profile web up -d`),
+right here on the build-server host next to the API — a separate
+public-facing Caddy just `reverse_proxy`s to it, the same way it does for
+the API, rather than serving files itself. Needs `WEB_UI_ORIGIN` set in
+`.env` for CORS, since its public hostname is a different origin than the
+API's. Sign-in is a manually-pasted API key kept only in that browser
+tab's session storage.
 
 A `system:manage`-scoped key also gets an **Admin** page: current version
 vs. the latest GitHub tag (`GITHUB_REPO` in `.env`), a button that

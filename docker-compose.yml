@@ -36,3 +36,18 @@ services:
     # the host's docker group id (see .env.example).
     group_add:
       - "${DOCKER_GID}"
+
+  # Serves web/ (the optional dashboard) on this same host, right next to
+  # the API — not copied to or served from the separate public-facing
+  # Caddy host. That Caddy instance reverse_proxys to this over the LAN,
+  # exactly like it does for the API. See docs/caddy-setup.md.
+  web:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    profiles:
+      - web
+    ports:
+      - "${WEB_PORT:-8081}:80"
+    volumes:
+      - ./web:/srv/web:ro
+      - ./Caddyfile.web:/etc/caddy/Caddyfile:ro

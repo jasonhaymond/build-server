@@ -51,11 +51,13 @@ the build server touching are also running, until that hardening lands.
 
 - Docker and Docker Compose installed on the target host.
 - Port 8080 (or whatever `PORT` you choose) free on that host, or already
-  known to belong to this deployment if you're updating an existing one.
-  `scripts/setup.mjs` checks this automatically for a **new** port choice
-  (it doesn't re-check a port this same deployment already owns from a
-  prior run) and offers to pick a different one; the manual equivalent is
-  `ss -ltnp | grep :8080` or similar before assuming it's free.
+  known to belong to this deployment if you're updating an existing one —
+  and, if you're also running the web UI, a second free port for
+  `WEB_PORT` (default `8081`). `scripts/setup.mjs` checks each
+  automatically for a **new** port choice (it doesn't re-check a port
+  this same deployment already owns from a prior run) and offers to pick
+  a different one; the manual equivalent is `ss -ltnp | grep :8080` or
+  similar before assuming a port is free.
 - A separate reverse proxy (Caddy is the default choice for this project)
   terminating TLS and forwarding to this host's `PORT`. This is a manual,
   system-level step this repo doesn't own — see
@@ -67,12 +69,15 @@ the build server touching are also running, until that hardening lands.
   LAN address.
 - Host firewall (`ufw` or equivalent) allowing only SSH, 80, and 443
   externally, plus **specifically the reverse-proxy host's IP** on `PORT`
-  internally — not the whole LAN. Example:
+  (and `WEB_PORT`, if running the web UI) internally — not the whole LAN.
+  Example:
   ```bash
-  sudo ufw allow from 10.x.x.x to any port 8080 proto tcp
+  sudo ufw allow from 10.x.x.x to any port 8080 proto tcp   # PORT
+  sudo ufw allow from 10.x.x.x to any port 8081 proto tcp   # WEB_PORT
   ```
-  Never expose `PORT` to the Internet directly, and never allow it from
-  "anywhere" on the LAN either — only from the specific host running Caddy.
+  Never expose `PORT`/`WEB_PORT` to the Internet directly, and never allow
+  them from "anywhere" on the LAN either — only from the specific host
+  running Caddy.
 
 ## First deploy
 
@@ -120,6 +125,9 @@ Edit `.env`:
   trusted/internal-only.
 - `GITHUB_REPO` (optional) — `owner/repo`, used by the web UI's Admin page
   to check for a newer version. Leave unset to skip the check.
+- `WEB_PORT` / `WEB_UI_ORIGIN` (optional — only if you're deploying the
+  web UI, see Web UI below) — the port its own static file server listens
+  on, and the public origin it's served at.
 
 **Both paths continue the same way** — build the Android build image (the
 isolated per-build environment, not the API itself) and bring up the API:
@@ -128,6 +136,10 @@ isolated per-build environment, not the API itself) and bring up the API:
 docker build -t build-server-android:latest .
 docker compose up -d --build
 ```
+
+(Add `--profile web` to that last command if you configured `WEB_PORT` /
+`WEB_UI_ORIGIN` above and want the web UI's static file server running
+too — see Web UI below.)
 
 Verify it's actually serving traffic:
 
@@ -165,6 +177,13 @@ truth; image caches get pruned, a git tag doesn't.
 Can also be triggered from the web UI's Admin page (a `system:manage`
 key) instead of an SSH session — see Web UI below for how that works and
 its architecture.
+
+If you're running the `web` service, `scripts/update.sh` doesn't need to
+know about it or pass `--profile web` — `git pull` already updates its
+bind-mounted files live, and `docker compose up -d` (no profile flag)
+leaves an already-running `web` container alone rather than stopping it.
+Verified directly: a plain `docker compose up -d` after `web` was started
+with `--profile web` left it running, untouched.
 
 **Manual equivalent:**
 
@@ -273,23 +292,35 @@ being signed in.
 `web/` is a plain static site (no build step, no framework) that talks to
 this API over plain HTTP `fetch()` — it never touches Gradle, Docker,
 SQLite, or build directories directly, only the same API any other client
-uses. It's meant to be served by Caddy as its **own** site, not by the API
-process.
+uses. It's served by its own `web` Compose service, **right here on the
+build-server host** — not copied anywhere else. Bring it up with:
 
-Because it's a different origin from the API, the API needs to be told to
-allow it via CORS — set `WEB_UI_ORIGIN` in `.env` to the exact origin the
-web UI is served from (e.g. `https://builds.example.com` — the primary
-domain; the API gets the `builds-api.<domain>` subdomain), then
-`docker compose up -d` (or restart the non-Compose process) to pick it
-up. Leaving it unset means no cross-origin access at all — never set it
-to a wildcard.
+```bash
+docker compose --profile web up -d --build
+```
 
-Adding the Caddy site block is a manual, system-level step (this repo
-doesn't own Caddy's config) — see **[caddy-setup.md](caddy-setup.md)**
-for the full setup: a complete example Caddyfile for both this route and
-the API's, getting `web/` onto the Caddy host, a cache-control detail
-specific to this app's no-build-step static files, and optional
-IP-restriction if the dashboard shouldn't be fully public.
+(It's opt-in — a plain `docker compose up -d` won't start it — since the
+web UI is optional. `scripts/setup.mjs` asks whether to set this up and
+picks `WEB_PORT` for you, the same conflict-checked way it picks the
+API's `PORT`.)
+
+The separate public-facing Caddy (a different host, terminating TLS)
+`reverse_proxy`s to this host for the web UI's public hostname, exactly
+the same way it does for the API's — see
+**[caddy-setup.md](caddy-setup.md)** for the full setup: a complete
+example Caddyfile for both routes, a cache-control detail specific to
+this app's no-build-step static files, and optional IP-restriction if the
+dashboard shouldn't be fully public. Because `web/` is bind-mounted
+(not baked into an image), updates to it take effect immediately — no
+separate deploy step, no file copying to another host.
+
+Because the web UI's public hostname is a different origin from the
+API's, the API needs to be told to allow it via CORS — set
+`WEB_UI_ORIGIN` in `.env` to the exact public origin the web UI is
+served from (e.g. `https://builds.example.com` — the primary domain; the
+API gets the `builds-api.<domain>` subdomain), then `docker compose up
+-d` (or restart the non-Compose process) to pick it up. Leaving it unset
+means no cross-origin access at all — never set it to a wildcard.
 
 Sign-in is a manually-pasted API key (created with
 `scripts/create-api-key.mjs`), kept only in that browser tab's session
