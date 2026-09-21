@@ -197,7 +197,7 @@ function processQueue() {
 app.get("/health", (req, res) => {
   res.json({
     status: "ok",
-    service: "android-build-server",
+    service: "build-server",
     activeBuild,
     queuedBuilds: buildQueue.length,
   });

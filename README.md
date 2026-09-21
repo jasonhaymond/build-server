@@ -1,6 +1,11 @@
-# android-build-server
+# build-server
 
-A self-hosted, project-agnostic Android build service. It accepts
+A self-hosted, project-agnostic build service. Android is the only
+supported platform today, but the project is named `build-server` (not
+`android-build-server`) because it's meant to grow to other platforms
+later without another rename.
+
+It accepts
 Android/Expo/React Native source and build configuration, builds it in an
 isolated Docker container, stores the resulting APK/AAB, and returns a
 permanent public download URL.

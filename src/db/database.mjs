@@ -2,6 +2,8 @@ import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { runMigrations } from "./migrate.mjs";
+import { migrations } from "./migrations/index.mjs";
 
 const serverDir = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -18,35 +20,7 @@ const db = new Database(dbPath);
 
 db.pragma("journal_mode = WAL");
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS builds (
-    id TEXT PRIMARY KEY,
-    project_name TEXT NOT NULL,
-    status TEXT NOT NULL,
-    submitted_at TEXT NOT NULL,
-    started_at TEXT,
-    completed_at TEXT,
-    exit_code INTEGER,
-    error TEXT
-  );
-
-  CREATE TABLE IF NOT EXISTS api_keys (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    key_hash TEXT NOT NULL UNIQUE,
-    created_at TEXT NOT NULL,
-    enabled INTEGER NOT NULL DEFAULT 1
-  );
-
-  CREATE TABLE IF NOT EXISTS artifact_download_tokens (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    token_hash TEXT NOT NULL UNIQUE,
-    build_id TEXT NOT NULL,
-    filename TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    enabled INTEGER NOT NULL DEFAULT 1
-  );
-`);
+runMigrations(db, migrations);
 
 export function createBuild({
   id,
