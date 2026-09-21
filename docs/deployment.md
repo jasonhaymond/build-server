@@ -52,8 +52,10 @@ the build server touching are also running, until that hardening lands.
 - Docker and Docker Compose installed on the target host.
 - Port 8080 (or whatever `PORT` you choose) free on that host, or already
   known to belong to this deployment if you're updating an existing one.
-  A **new** deployment to a host should check for a conflicting listener
-  first (`ss -ltnp | grep :8080` or equivalent) rather than assume it's free.
+  `scripts/setup.mjs` checks this automatically for a **new** port choice
+  (it doesn't re-check a port this same deployment already owns from a
+  prior run) and offers to pick a different one; the manual equivalent is
+  `ss -ltnp | grep :8080` or similar before assuming it's free.
 - A separate reverse proxy (Caddy is the default choice for this project)
   terminating TLS and forwarding to this host's `PORT`. See
   PROJECT-SCOPE.md's Reverse Proxy section for the Caddy config shape.
@@ -107,6 +109,8 @@ Edit `.env`:
   (`1000:1000`) unless you have a specific reason to change them.
 - `ALLOW_LOCAL_GIT_SOURCES` — leave `false` unless this deployment is
   trusted/internal-only.
+- `GITHUB_REPO` (optional) — `owner/repo`, used by the web UI's Admin page
+  to check for a newer version. Leave unset to skip the check.
 
 **Both paths continue the same way** — build the Android build image (the
 isolated per-build environment, not the API itself) and bring up the API:
@@ -143,7 +147,16 @@ scripts/update.sh v1.2.3       # or deploy/roll back to a specific tag
 The script refuses to run over uncommitted local changes, takes a database
 + `.env` snapshot first (`scripts/backup.mjs`) regardless of any other
 backup schedule, rebuilds the Android image, restarts the API via Compose,
-and polls `/health` before declaring success.
+and polls `/health` before declaring success. It also tags both rebuilt
+images with the running `package.json` version
+(`build-server-android:vX.Y.Z`, `build-server-api:vX.Y.Z`) alongside
+`:latest` — lets a schema-compatible rollback redeploy a cached image
+instead of rebuilding from source. The git tag is still the source of
+truth; image caches get pruned, a git tag doesn't.
+
+Can also be triggered from the web UI's Admin page (a `system:manage`
+key) instead of an SSH session — see Web UI below for how that works and
+its architecture.
 
 **Manual equivalent:**
 
@@ -274,3 +287,74 @@ user accounts/sessions — PROJECT-SCOPE.md itself describes those as
 "Eventually," with no concrete design given (no user table, no password
 policy). A key with `build:read:any` sees every client's builds in the
 dashboard, matching its API-level access; a scoped key only sees its own.
+
+### Admin page (version, update trigger, backups, logs)
+
+A key with the `system:manage` scope sees an **Admin** page: current
+version vs. the latest GitHub tag (`GITHUB_REPO`), a build-metrics
+summary, a tail of the API's own operational log
+(`GET /api/v1/system/logs`), a **Back up now** button
+(`POST /api/v1/system/backup`, runs the same `runBackup()` logic as
+`scripts/backup.mjs` — one implementation, two callers), and an
+**Update now** button. This is the in-app equivalent of running
+`scripts/update.sh`/`scripts/backup.mjs` over SSH, per the project's
+built-in-update-visibility and backups standards — same scripts, same
+safety guards, just triggered from a browser instead of a terminal. The
+update button shows a confirmation dialog before firing, since it
+redeploys the live service; the backup button doesn't need one (it's not
+destructive).
+
+Signing in only requires a *valid* key (`GET /api/v1/whoami`, no
+particular scope) — an admin-only key with `system:manage` but not
+`build:read` can still sign in and use the Admin page; it just can't load
+the build dashboard, and shows a clear scope error there instead of being
+silently locked out of signing in at all.
+
+**How it actually works** — the API container only has its own source
+baked into its image at build time, not the live git repo or
+`docker-compose.yml` as a directory tree, so it can't run `git pull` /
+`docker compose up` on *itself*. Clicking the button
+(`POST /api/v1/system/update`, `src/system/update.mjs`) instead spawns a
+short-lived **sibling** container — the same image (`API_IMAGE`, set in
+`docker-compose.yml`), launched over the same Docker socket the API
+already uses for build containers — with the full host project directory
+bind-mounted at its real host path (`HOST_PROJECT_DIR`, the same variable
+and pattern the build-container mounts already use) and `--network host`
+so the script's own health-check `curl` can reach the restarted service's
+published port. That sibling container runs the real
+`scripts/update.sh`, unmodified, with every one of its safety guards
+intact.
+
+Requires `HOST_PROJECT_DIR` and `API_IMAGE` to be set (Compose deployments
+only); without them the button returns a clear error rather than doing
+nothing silently. `Dockerfile.api` includes the `docker compose` CLI
+plugin and `curl` specifically so this sibling container can run the
+update script end to end.
+
+This mechanism was verified end-to-end on a real Linux container (the
+actual deployment target): a sibling container using this exact
+mount/socket/network pattern successfully brought up a Compose stack and
+reached its published port via `--network host`. The button itself
+(spawning that sibling container from a live API process) was verified up
+to the point of "does the API correctly refuse when misconfigured, and
+does it correctly construct and send the request" — actually letting it
+redeploy a real running deployment as part of a test has no place in an
+automated suite, for the same reason `scripts/update.sh` itself isn't
+run for real in CI.
+
+The backup button was verified further, including through a real browser
+session: sign-in with an admin-only key, click, request reaches the API,
+`runBackup()` executes for real. (One `tar` quirk surfaced only on
+Windows dev machines — a `C:\...` path's drive-letter colon collides with
+bsdtar's `host:path` syntax — and doesn't apply to the real Linux target,
+where the identical code was independently verified working via
+`scripts/backup.mjs`.)
+
+That same test against a real Compose deployment caught a genuine gap:
+`.env` wasn't bind-mounted into the API container at all, so a backup
+triggered from the web UI silently omitted it (`envIncluded: false` in
+the response) even though the CLI script, run on the host, always
+included it. Fixed by mounting `./.env:/app/.env:ro` in
+`docker-compose.yml` — read-only, since `env_file:` already injects its
+values as environment variables; the file itself only needs to be
+*readable* for `runBackup()` to copy it into the archive.

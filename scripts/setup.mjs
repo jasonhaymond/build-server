@@ -6,6 +6,7 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
 import readline from "node:readline";
 import { randomBytes } from "node:crypto";
 import { dirname, resolve } from "node:path";
@@ -55,6 +56,40 @@ function parseEnvFile(path) {
   );
 }
 
+function isPortInUse(port) {
+  return new Promise((resolvePromise) => {
+    const tester = createServer()
+      .once("error", () => resolvePromise(true))
+      .once("listening", () => tester.close(() => resolvePromise(false)))
+      .listen(port, "0.0.0.0");
+  });
+}
+
+// Only a NEW deployment (or picking a different port than what's already
+// recorded) needs this check — a port this same deployment already owns
+// from a prior run isn't a conflict, it's just itself.
+async function choosePort(defaultPort, isNewPort) {
+  let port = await ask("Port the API listens on", defaultPort);
+
+  if (!isNewPort(port)) {
+    return port;
+  }
+
+  while (await isPortInUse(Number(port))) {
+    console.log("");
+    console.log(`Port ${port} already has something listening on it on this host.`);
+    const useAnyway = await askYesNo("Use it anyway?", false);
+
+    if (useAnyway) {
+      break;
+    }
+
+    port = await ask("Enter a different port", undefined);
+  }
+
+  return port;
+}
+
 function detectDockerGid() {
   try {
     return execFileSync("getent", ["group", "docker"], { encoding: "utf8" })
@@ -81,7 +116,10 @@ console.log("");
 console.log("=== build-server setup ===");
 console.log("");
 
-const port = await ask("Port the API listens on", existing.PORT ?? "8080");
+const port = await choosePort(
+  existing.PORT ?? "8080",
+  (candidate) => candidate !== existing.PORT,
+);
 const publicBaseUrl = await ask(
   "Public base URL (behind your reverse proxy)",
   existing.PUBLIC_BASE_URL ?? `http://localhost:${port}`,
@@ -105,6 +143,10 @@ const allowLocalGit = await askYesNo(
   "Allow local filesystem Git sources? (trusted/internal deployments only)",
   existing.ALLOW_LOCAL_GIT_SOURCES === "true",
 );
+const githubRepo = await ask(
+  "GitHub repo (owner/repo) to check for newer versions — blank to skip",
+  existing.GITHUB_REPO ?? "",
+);
 
 const useCompose = await askYesNo("Deploy with Docker Compose?", true);
 
@@ -115,6 +157,7 @@ const lines = [
   `JOB_SECRETS_ENCRYPTION_KEY=${secretsKey}`,
   `BUILD_TIMEOUT_MS=${buildTimeoutMs}`,
   `ALLOW_LOCAL_GIT_SOURCES=${allowLocalGit}`,
+  ...(githubRepo ? [`GITHUB_REPO=${githubRepo}`] : []),
 ];
 
 if (useCompose) {

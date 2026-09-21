@@ -54,10 +54,19 @@ async function request(path, options = {}) {
 
 export const api = {
   health: () => request("/health"),
+  whoami: () => request("/api/v1/whoami"),
   listBuilds: (params = {}) => request(`/api/v1/builds?${new URLSearchParams(params)}`),
   getBuild: (id) => request(`/api/v1/builds/${encodeURIComponent(id)}`),
   getLogs: (id) => request(`/api/v1/builds/${encodeURIComponent(id)}/logs`),
   getArtifacts: (id) => request(`/api/v1/builds/${encodeURIComponent(id)}/artifacts`),
   submitBuild: (job) => request("/api/v1/builds", { method: "POST", body: JSON.stringify(job) }),
   cancelBuild: (id) => request(`/api/v1/builds/${encodeURIComponent(id)}/cancel`, { method: "POST" }),
+  getSystemStatus: () => request("/api/v1/system"),
+  getMetrics: () => request("/api/v1/metrics"),
+  getSystemLogs: (params = {}) => request(`/api/v1/system/logs?${new URLSearchParams(params)}`),
+  triggerUpdate: (targetRef) => request("/api/v1/system/update", {
+    method: "POST",
+    body: JSON.stringify(targetRef ? { targetRef } : {}),
+  }),
+  triggerBackup: () => request("/api/v1/system/backup", { method: "POST", body: "{}" }),
 };

@@ -20,6 +20,7 @@ function layout(activeRoute, bodyHtml) {
   const links = [
     ["#/", "Dashboard"],
     ["#/submit", "Submit build"],
+    ["#/admin", "Admin"],
   ];
 
   const nav = links
@@ -87,7 +88,7 @@ async function renderSignIn() {
     setApiKey(key);
 
     try {
-      await api.listBuilds({ limit: 1 });
+      await api.whoami();
       renderRoute();
     } catch (error) {
       clearApiKey();
@@ -349,6 +350,140 @@ async function renderBuildDetail(id) {
   dashboardTimer = setInterval(load, 4000);
 }
 
+async function renderAdmin() {
+  stopDashboardPolling();
+
+  layout("#/admin", `
+    <div id="adminError"></div>
+    <div id="adminBody">Loading…</div>
+  `);
+
+  const bodyEl = document.getElementById("adminBody");
+  const errorEl = document.getElementById("adminError");
+
+  async function load() {
+    try {
+      const [status, metrics, logs] = await Promise.all([
+        api.getSystemStatus(),
+        api.getMetrics(),
+        api.getSystemLogs({ lines: 100 }),
+      ]);
+
+      errorEl.innerHTML = "";
+
+      const updateBanner = status.checked && status.updateAvailable
+        ? `<div class="error" style="color: var(--warn); border-color: var(--warn); background: rgba(210,153,34,0.1);">
+             A newer version is available: v${escapeHtml(status.latestVersion)} (running v${escapeHtml(status.version)})
+           </div>`
+        : "";
+
+      const statusRows = Object.entries(metrics.buildsByStatus || {})
+        .map(([s, count]) => `<tr><td>${statusBadge(s)}</td><td>${count}</td></tr>`)
+        .join("") || `<tr><td colspan="2" class="muted">No builds yet.</td></tr>`;
+
+      const logLines = logs.entries
+        .map((e) => `${e.ts ?? ""} [${(e.level ?? "info").toUpperCase()}] ${e.source ?? ""}: ${e.msg ?? ""}`)
+        .join("\n");
+
+      bodyEl.innerHTML = `
+        <h2>Admin</h2>
+        ${updateBanner}
+        <div class="card">
+          <h3>Version</h3>
+          <p>Running: <strong>v${escapeHtml(status.version)}</strong>
+            ${status.checked ? `· Latest: v${escapeHtml(status.latestVersion)}` : `· <span class="muted">(couldn't check for updates — GITHUB_REPO not set or unreachable)</span>`}
+          </p>
+          <p class="muted">Last boot: ${status.lastBootAt ? escapeHtml(new Date(status.lastBootAt).toLocaleString()) : "unknown"}</p>
+          <div class="row">
+            <input id="targetRef" placeholder="Target tag (blank = latest)" style="max-width: 220px;" />
+            <button class="primary" id="updateBtn">Update now</button>
+          </div>
+          <p class="muted">
+            Runs the real <code>scripts/update.sh</code> (uncommitted-changes guard,
+            pre-update snapshot, health-check poll) in a fresh sibling container.
+            Only works for Docker Compose deployments with
+            <code>HOST_PROJECT_DIR</code>/<code>API_IMAGE</code> set.
+          </p>
+        </div>
+
+        <div class="card">
+          <h3>Backups</h3>
+          <button id="backupBtn">Back up now</button>
+          <p class="muted">
+            Snapshots the database (consistent, safe against a live database)
+            and <code>.env</code> to <code>backups/</code> on the server —
+            the same thing <code>scripts/update.sh</code> already does before
+            every update. This only protects you if the backup also leaves
+            the host; see docs/deployment.md.
+          </p>
+          <div id="backupResult"></div>
+        </div>
+
+        <div class="card">
+          <h3>Queue</h3>
+          <p>Active build: ${status.activeBuild ? statusBadge("building") : `<span class="muted">none</span>`}
+             · Queued: ${status.queuedBuilds}</p>
+          <table>
+            <thead><tr><th>Status</th><th>Count</th></tr></thead>
+            <tbody>${statusRows}</tbody>
+          </table>
+          <p class="muted">Average build duration: ${metrics.averageDurationMs ? `${(metrics.averageDurationMs / 1000).toFixed(1)}s` : "—"} (${metrics.durationSampleCount} sample(s))</p>
+        </div>
+
+        <div class="card">
+          <div class="spaced">
+            <h3>API log (last 100 lines)</h3>
+            <button id="refreshLogsBtn">Refresh</button>
+          </div>
+          <pre class="logs">${escapeHtml(logLines || "(no log entries yet)")}</pre>
+        </div>
+      `;
+
+      document.getElementById("refreshLogsBtn").addEventListener("click", load);
+
+      document.getElementById("backupBtn").addEventListener("click", async (event) => {
+        const btn = event.currentTarget;
+        const resultEl = document.getElementById("backupResult");
+
+        btn.disabled = true;
+        resultEl.innerHTML = "";
+
+        try {
+          const result = await api.triggerBackup();
+          resultEl.innerHTML = `<p class="muted">Backup written: ${escapeHtml(result.archivePath)}</p>`;
+        } catch (error) {
+          resultEl.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
+        } finally {
+          btn.disabled = false;
+        }
+      });
+
+      document.getElementById("updateBtn").addEventListener("click", async () => {
+        const targetRef = document.getElementById("targetRef").value.trim();
+        const confirmed = window.confirm(
+          targetRef
+            ? `Trigger a real update to ${targetRef}? This redeploys the live service.`
+            : "Trigger a real update to the latest commit? This redeploys the live service.",
+        );
+
+        if (!confirmed) return;
+
+        try {
+          const result = await api.triggerUpdate(targetRef || undefined);
+          errorEl.innerHTML = `<div class="card">Update triggered (${escapeHtml(result.targetRef)}). The service will restart shortly — this page may briefly lose connection.</div>`;
+        } catch (error) {
+          errorEl.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
+        }
+      });
+    } catch (error) {
+      bodyEl.innerHTML = "";
+      errorEl.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
+    }
+  }
+
+  await load();
+}
+
 function renderRoute() {
   if (!getApiKey()) {
     stopDashboardPolling();
@@ -361,6 +496,8 @@ function renderRoute() {
 
   if (hash === "#/submit") {
     renderSubmit();
+  } else if (hash === "#/admin") {
+    renderAdmin();
   } else if (buildMatch) {
     renderBuildDetail(decodeURIComponent(buildMatch[1]));
   } else {

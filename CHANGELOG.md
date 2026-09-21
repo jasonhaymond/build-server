@@ -5,6 +5,80 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.0] - 2026-09-21
+
+A full pass applying the project's global development standards
+end-to-end — deployment automation, backups, and update tooling in
+particular — plus a fix for a gap the previous pass's own tooling
+surfaced. First 1.0 release: every documented feature has been verified
+against a real dependency (real SQLite, real Docker, a real headless
+browser, a real GitHub API call, a real Linux container for anything
+Windows couldn't faithfully emulate), not just read for correctness.
+
+### Added
+
+- **Admin page — backups & version visibility**, closing the standard's
+  built-in-update-visibility and backups requirements: a `system:manage`
+  key sees the running version vs. the latest GitHub tag (`GITHUB_REPO`),
+  a build-metrics summary, a tail of the API's own log, a **Back up now**
+  button, and the **Update now** trigger added alongside it (see below).
+- `GET /api/v1/system`, `GET /api/v1/system/logs`, `POST
+  /api/v1/system/backup`, `POST /api/v1/system/update` — all
+  `system:manage` scoped.
+- `GET /api/v1/whoami`: any valid key, no particular scope required — the
+  web UI's sign-in now verifies a key this way instead of via
+  `build:read`-gated `listBuilds`, so an admin-only key isn't locked out
+  of signing in at all. Found by testing sign-in with a real admin-only
+  key rather than assuming any authenticated call would do.
+- **A real, working update-trigger button**, not just a status display.
+  The API container only has its own source baked into its image, not
+  the live git repo, so it spawns a short-lived sibling container (same
+  image, over the same Docker socket already used for build containers)
+  with the full host project bind-mounted at its real host path and
+  `--network host`, and runs the actual `scripts/update.sh` inside it —
+  every safety guard (uncommitted-changes check, pre-update snapshot,
+  health-check poll) applies exactly as it would over SSH.
+  `Dockerfile.api` gained the `docker compose` CLI plugin and `curl` to
+  make this possible. Verified end-to-end on a real Linux container: a
+  sibling container using this exact pattern brought up a Compose stack
+  and reached its published port.
+- `src/system/backup.mjs`: `runBackup()` extracted out of
+  `scripts/backup.mjs` so the CLI and the new API route share one
+  implementation.
+- `scripts/update.sh` now tags both rebuilt images with the running
+  version (`build-server-api:vX.Y.Z`, `build-server-android:vX.Y.Z`)
+  alongside `:latest` — the optional speed-optimization the versioning
+  standard describes for a schema-compatible rollback.
+- `scripts/setup.mjs` now checks a newly-chosen port for an existing
+  listener before writing it to `.env`, offering to pick another —
+  doesn't re-check a port the same deployment already owns from a prior
+  run. Verified the underlying check on real Linux (Windows sockets
+  don't reliably raise `EADDRINUSE` the same way — noted, not worked
+  around, since it doesn't affect the real deployment target).
+- `npm run migrate`: an explicit, discrete migration command for deploy
+  scripts/CI to call non-interactively, alongside the automatic
+  on-boot migration that already existed.
+- `.env.example` now documents every env var the code actually reads
+  (`RETENTION_DAYS`, `LOG_MAX_SIZE_BYTES`, `GITHUB_REPO` were missing;
+  `API_IMAGE`/`DB_PATH` are explicitly noted as not meant to be
+  hand-set, with the reasoning given).
+- `PROJECT-SCOPE.md` marked as the historical handoff document it is,
+  pointing to `README.md`/`CHANGELOG.md`/`docs/deployment.md` for
+  current state — its own "Current Known Limitations" section describes
+  handoff-time status, most of which is now resolved.
+
+### Fixed
+
+- `docker-compose.yml` never bind-mounted `.env` into the API container
+  — only its resolved values were injected via `env_file:`. This meant
+  a backup triggered from the web UI (running inside that container)
+  silently omitted `.env` from the archive (`envIncluded: false`) even
+  though the CLI script, run on the host, always included it — a real
+  violation of the backups standard's "database and env files together"
+  rule. Found by testing the backup button against a real Compose
+  deployment rather than assuming parity with the CLI path. Fixed with a
+  read-only mount.
+
 ## [0.10.0] - 2026-09-21
 
 ### Added
@@ -345,6 +419,7 @@ through the live HTTP API (submit → building → failed, with the persisted
   unguessable artifact download tokens, and a real Clocker release build
   completed end-to-end through the generic worker.
 
+[1.0.0]: https://github.com/jasonhaymond/build-server/releases/tag/v1.0.0
 [0.10.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.10.0
 [0.9.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.9.0
 [0.8.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.8.0

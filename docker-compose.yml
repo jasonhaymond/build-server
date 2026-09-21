@@ -3,9 +3,15 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.api
+    image: build-server-api:latest
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      # Lets the running container spawn the sibling update-runner
+      # container (see src/system/update.mjs) using its own image, rather
+      # than hardcoding the image name in source.
+      - API_IMAGE=build-server-api:latest
     # The app binds directly to $PORT (see .env) rather than always
     # listening on a fixed internal port, so both sides of the mapping
     # must match whatever PORT is actually set to.
@@ -20,6 +26,11 @@ services:
       - ./builds:/app/builds
       - ./uploads:/app/uploads
       - ./jobs:/app/jobs
+      # Read-only: env_file already injects these as process env vars;
+      # the file itself needs to be visible too so a backup taken from
+      # inside the container (the web UI's "Back up now" button) can
+      # include it, matching the host-run CLI backup's behavior.
+      - ./.env:/app/.env:ro
     # Lets the container's user read/write the mounted docker.sock without
     # running the whole process as root. DOCKER_GID must be set in .env to
     # the host's docker group id (see .env.example).

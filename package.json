@@ -1,11 +1,12 @@
 {
   "name": "build-server",
-  "version": "0.10.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "worker": "node src/worker/index.mjs",
     "api": "node src/api/server.mjs",
+    "migrate": "node scripts/migrate.mjs",
     "test": "vitest run"
   },
   "dependencies": {

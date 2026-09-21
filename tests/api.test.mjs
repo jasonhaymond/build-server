@@ -32,6 +32,17 @@ describe("authentication", () => {
   });
 });
 
+describe("GET /api/v1/whoami", () => {
+  it("accepts any valid key regardless of scopes", async () => {
+    const key = createTestApiKey({ name: "admin-only", scopes: ["system:manage"] });
+    const res = await request(app).get("/api/v1/whoami").set("Authorization", `Bearer ${key}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.name).toBe("admin-only");
+    expect(res.body.scopes).toEqual(["system:manage"]);
+  });
+});
+
 describe("build submission validation", () => {
   it("rejects a non-object body", async () => {
     const key = createTestApiKey();

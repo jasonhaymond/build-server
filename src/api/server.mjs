@@ -20,6 +20,7 @@ import {
   disableArtifactDownloadTokenForArtifact,
   getApiKeyByHash,
   getApiKeyById,
+  getAppMeta,
   getArtifactDownloadToken,
   getArtifactsForBuild,
   getBuild,
@@ -34,6 +35,9 @@ import { cancelQueuedBuild, processQueue, queueState } from "../queue/queue.mjs"
 import { reconstructQueueOnStartup } from "../queue/recovery.mjs";
 import { encryptSecrets } from "../security/secrets.mjs";
 import { KNOWN_SCOPES, hasScope, parseScopes, serializeScopes } from "../security/scopes.mjs";
+import { runBackup } from "../system/backup.mjs";
+import { tailApiLog } from "../system/logs.mjs";
+import { checkLatestVersion, triggerUpdate } from "../system/update.mjs";
 
 const logger = createLogger("api");
 const app = express();
@@ -42,6 +46,9 @@ const publicBaseUrl = (
   process.env.PUBLIC_BASE_URL ?? "http://localhost:8080"
 ).replace(/\/$/, "");
 const secretsKey = process.env.JOB_SECRETS_ENCRYPTION_KEY;
+
+const packageJsonPath = resolve(dirname(fileURLToPath(import.meta.url)), "../../package.json");
+const { version: appVersion } = JSON.parse(readFileSync(packageJsonPath, "utf8"));
 
 // Fail fast at startup rather than on the first build submission.
 try {
@@ -220,6 +227,14 @@ app.get("/health", (req, res) => {
 });
 
 app.use("/api/v1", authenticateApiKey);
+
+// Any valid key, whatever its scopes — lets the web UI's sign-in confirm
+// a key is real without assuming it holds any particular scope (an
+// admin-only key with system:manage but no build:read is legitimate and
+// shouldn't be locked out of signing in at all).
+app.get("/api/v1/whoami", (req, res) => {
+  return res.json({ id: req.apiKey.id, name: req.apiKey.name, scopes: req.apiKey.scopes });
+});
 
 app.post("/api/v1/builds", requireScope("build:create"), (req, res) => {
   const job = req.body;
@@ -502,6 +517,48 @@ app.get("/api/v1/metrics", requireScope("metrics:read"), (req, res) => {
   return res.json(getBuildMetrics());
 });
 
+app.get("/api/v1/system", requireScope("system:manage"), async (req, res) => {
+  const meta = getAppMeta();
+  const versionCheck = await checkLatestVersion(appVersion);
+
+  return res.json({
+    version: appVersion,
+    lastBootAt: meta?.updatedAt ?? null,
+    activeBuild: queueState.activeBuild,
+    queuedBuilds: queueState.buildQueue.length,
+    ...versionCheck,
+  });
+});
+
+app.post("/api/v1/system/update", requireScope("system:manage"), (req, res) => {
+  const targetRef = typeof req.body?.targetRef === "string" ? req.body.targetRef.trim() : undefined;
+
+  try {
+    const result = triggerUpdate({ targetRef: targetRef || undefined });
+    logger.info("Update triggered via API", { targetRef: result.targetRef, apiKeyId: req.apiKey.id });
+    return res.status(202).json(result);
+  } catch (error) {
+    return res.status(409).json({ error: error.message });
+  }
+});
+
+app.post("/api/v1/system/backup", requireScope("system:manage"), (req, res) => {
+  try {
+    const result = runBackup();
+    logger.info("Backup triggered via API", { apiKeyId: req.apiKey.id, archivePath: result.archivePath });
+    return res.status(201).json(result);
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+app.get("/api/v1/system/logs", requireScope("system:manage"), (req, res) => {
+  const lines = Math.min(Math.max(Number(req.query.lines) || 200, 1), 2000);
+  const level = ["info", "warn", "error"].includes(req.query.level) ? req.query.level : undefined;
+
+  return res.json({ entries: tailApiLog({ lines, level }) });
+});
+
 app.get("/download/:token/:filename", (req, res) => {
   const { token, filename } = req.params;
 
@@ -571,13 +628,10 @@ export { app };
 const isMainModule = import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (isMainModule) {
-  const packageJsonPath = resolve(dirname(fileURLToPath(import.meta.url)), "../../package.json");
-  const { version } = JSON.parse(readFileSync(packageJsonPath, "utf8"));
-
-  upsertAppMeta(version);
+  upsertAppMeta(appVersion);
   reconstructQueueOnStartup();
 
   app.listen(port, () => {
-    logger.info("Build API listening", { port, version });
+    logger.info("Build API listening", { port, version: appVersion });
   });
 }

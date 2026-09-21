@@ -17,6 +17,11 @@ export const KNOWN_SCOPES = [
   "artifact:manage",
   "api-key:manage",
   "metrics:read",
+  // Version/update visibility and the update-trigger button, plus the
+  // operational (not per-build) log viewer — deliberately one scope
+  // covering all "manage this deployment" admin-panel actions, distinct
+  // from api-key:manage (which is specifically about key lifecycle).
+  "system:manage",
 ];
 
 export function parseScopes(scopesColumn) {

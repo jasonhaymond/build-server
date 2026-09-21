@@ -42,12 +42,20 @@ fi
 
 ANDROID_IMAGE="$(grep -E '^ANDROID_BUILD_IMAGE=' .env | cut -d= -f2-)"
 ANDROID_IMAGE="${ANDROID_IMAGE:-build-server-android:latest}"
+ANDROID_IMAGE_BASE="${ANDROID_IMAGE%%:*}"
+
+VERSION="$(node -p "require('./package.json').version")"
 
 echo "== Building the Android build image ($ANDROID_IMAGE) =="
-docker build -t "$ANDROID_IMAGE" .
+docker build -t "$ANDROID_IMAGE" -t "${ANDROID_IMAGE_BASE}:v${VERSION}" .
 
 echo "== Rebuilding and restarting the API (Docker Compose) =="
 docker compose build
+# Version-tagged alongside :latest — a speed optimization for a
+# schema-compatible rollback (redeploy a cached image instead of
+# rebuilding from source). The git tag remains the source of truth;
+# image caches get pruned, a git tag doesn't.
+docker tag build-server-api:latest "build-server-api:v${VERSION}"
 docker compose up -d
 # SQLite migrations run automatically on API startup (src/db/migrate.mjs)
 # — non-interactive and forward-only, no separate step needed here.
