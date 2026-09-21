@@ -2,6 +2,7 @@
 
 import {
   appendFileSync,
+  createWriteStream,
   cpSync,
   existsSync,
   mkdirSync,
@@ -10,8 +11,11 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { execFileSync, spawn } from "node:child_process";
+import yauzl from "yauzl";
+import { validateGitSource } from "../security/gitSource.mjs";
 
 const serverDir = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const buildsDir = resolve(serverDir, "builds");
@@ -187,6 +191,15 @@ if (sourceType === "upload" && (!statSync(sourceInputPath).isFile() || !sourceIn
 }
 
 if (sourceType === "git") {
+  try {
+    await validateGitSource(job.project.source, {
+      allowLocal: process.env.ALLOW_LOCAL_GIT_SOURCES === "true",
+    });
+  } catch (error) {
+    logError(`Git source rejected: ${error.message}`);
+    process.exit(1);
+  }
+
   log("=== Cloning Git repository ===");
   log(`Repository: ${job.project.source.url}`);
   log(`Destination: ${sourceInputPath}`);
@@ -211,30 +224,74 @@ if (sourceType === "git") {
   log("Git clone completed.");
   log("");
 }
-function extractZipSafely(zipPath, destination) {
-  const listing = execFileSync("unzip", ["-Z", "-1", zipPath], {
-    encoding: "utf8",
+async function extractZipSafely(zipPath, destination) {
+  const zipfile = await new Promise((resolvePromise, rejectPromise) => {
+    yauzl.open(
+      zipPath,
+      { lazyEntries: true, autoClose: false },
+      (error, file) => (error ? rejectPromise(error) : resolvePromise(file)),
+    );
   });
 
-  for (const entry of listing.split(/\r?\n/)) {
-    if (!entry) {
-      continue;
-    }
+  try {
+    await new Promise((resolvePromise, rejectPromise) => {
+      zipfile.on("error", rejectPromise);
+      zipfile.on("end", resolvePromise);
 
-    const normalized = entry.replace(/\\/g, "/");
+      zipfile.on("entry", (entry) => {
+        handleEntry(entry).then(
+          () => zipfile.readEntry(),
+          (error) => rejectPromise(error),
+        );
+      });
 
-    if (
-      normalized.startsWith("/") ||
-      /^[A-Za-z]:\//.test(normalized) ||
-      normalized.split("/").includes("..")
-    ) {
-      throw new Error(`Unsafe ZIP entry path: ${entry}`);
-    }
+      zipfile.readEntry();
+
+      async function handleEntry(entry) {
+        const normalized = entry.fileName.replace(/\\/g, "/");
+
+        if (
+          normalized.startsWith("/") ||
+          /^[A-Za-z]:\//.test(normalized) ||
+          normalized.split("/").includes("..")
+        ) {
+          throw new Error(`Unsafe ZIP entry path: ${entry.fileName}`);
+        }
+
+        // High byte of versionMadeBy is the "host OS" that produced the
+        // entry; Unix (3) packs the file mode into the top 16 bits of
+        // externalFileAttributes. Only trust it as a symlink check when
+        // the entry actually claims to come from a Unix zip writer.
+        const isUnixEntry = (entry.versionMadeBy >>> 8) === 3;
+        const unixMode = isUnixEntry
+          ? (entry.externalFileAttributes >>> 16) & 0xffff
+          : 0;
+
+        if ((unixMode & 0xf000) === 0xa000) {
+          throw new Error(`Symlink ZIP entries are not allowed: ${entry.fileName}`);
+        }
+
+        const entryPath = resolve(destination, normalized);
+
+        if (normalized.endsWith("/")) {
+          mkdirSync(entryPath, { recursive: true });
+          return;
+        }
+
+        mkdirSync(dirname(entryPath), { recursive: true });
+
+        const readStream = await new Promise((resolveStream, rejectStream) => {
+          zipfile.openReadStream(entry, (error, stream) =>
+            error ? rejectStream(error) : resolveStream(stream),
+          );
+        });
+
+        await pipeline(readStream, createWriteStream(entryPath));
+      }
+    });
+  } finally {
+    zipfile.close();
   }
-
-  execFileSync("unzip", ["-q", zipPath, "-d", destination], {
-    stdio: "inherit",
-  });
 }
 
 const sourcePath = sourceType === "directory"
@@ -251,7 +308,7 @@ if (sourceType === "upload") {
   log(`Extracting to: ${sourcePath}`);
 
   try {
-    extractZipSafely(sourceInputPath, sourcePath);
+    await extractZipSafely(sourceInputPath, sourcePath);
   } catch (error) {
     logError(`ZIP extraction failed: ${error.message}`);
     process.exit(1);
@@ -373,6 +430,13 @@ const artifactDestination = resolve(
   `${safeProjectName}-${job.build.variant}.${job.build.artifact}`,
 );
 
+// Platform-prefixed so builds for other platforms (added later) can't
+// collide on container names, and so a build's container can be found by
+// name after a restart (used for the timeout below, and for recovery).
+const containerName = `build-${job.build.platform}-${job.id}`;
+
+const buildTimeoutMs = Number(process.env.BUILD_TIMEOUT_MS ?? 2 * 60 * 60 * 1000);
+
 const containerCommand = `
 set -e
 
@@ -484,6 +548,9 @@ const dockerArgs = [
   "run",
   "--rm",
 
+  "--name",
+  containerName,
+
   "--user",
   `${uid}:${gid}`,
 
@@ -542,6 +609,22 @@ function runDocker() {
       stdio: ["ignore", "pipe", "pipe"],
     });
 
+    let timedOut = false;
+
+    const timeoutHandle = setTimeout(() => {
+      timedOut = true;
+
+      logError("");
+      logError(`=== BUILD TIMEOUT ===`);
+      logError(`Build exceeded ${buildTimeoutMs}ms and is being terminated.`);
+
+      try {
+        execFileSync("docker", ["kill", containerName], { stdio: "ignore" });
+      } catch {
+        // Container may have already exited on its own; nothing more to do.
+      }
+    }, buildTimeoutMs);
+
     child.stdout.on("data", (chunk) => {
       const text = chunk.toString();
       process.stdout.write(text);
@@ -555,21 +638,23 @@ function runDocker() {
     });
 
     child.on("error", (error) => {
+      clearTimeout(timeoutHandle);
       logError(`Failed to start Docker: ${error.message}`);
-      resolvePromise(1);
+      resolvePromise({ code: 1, timedOut: false });
     });
 
     child.on("close", (code) => {
-      resolvePromise(code ?? 1);
+      clearTimeout(timeoutHandle);
+      resolvePromise({ code: code ?? 1, timedOut });
     });
   });
 }
 
-const exitCode = await runDocker();
+const { code: exitCode, timedOut } = await runDocker();
 
 if (exitCode !== 0) {
   log("");
-  logError(`=== BUILD FAILED ===`);
+  logError(timedOut ? "=== BUILD FAILED (timeout) ===" : "=== BUILD FAILED ===");
   logError(`Docker exited with code ${exitCode}`);
   process.exit(exitCode);
 }

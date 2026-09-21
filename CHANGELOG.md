@@ -5,6 +5,30 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-09-21
+
+### Added
+
+- ZIP symlink protection: `src/worker/index.mjs`'s ZIP extraction now uses
+  `yauzl` to inspect every entry's Unix mode before writing it, rejecting
+  symlink entries in addition to the existing absolute-path/`..`-traversal
+  checks. Extraction is now done fully in Node rather than shelling out to
+  `unzip`. This was the prerequisite PROJECT-SCOPE.md called out before
+  arbitrary public ZIP uploads could be considered.
+- Git source SSRF protection (`src/security/gitSource.mjs`): Git sources
+  must be HTTPS and must not resolve to a private/link-local/loopback
+  address, closing off the internal-network-probing path PROJECT-SCOPE.md
+  flagged. Trusted/internal use (including local filesystem paths, like the
+  proven Clocker build) can opt back in via `ALLOW_LOCAL_GIT_SOURCES=true`.
+- Build timeout: `BUILD_TIMEOUT_MS` (default 2 hours) now bounds every
+  build; a build that exceeds it is killed via `docker kill` and marked
+  failed with a clear timeout reason, instead of blocking the (currently
+  single-concurrency) queue indefinitely.
+- Deterministic per-build container names (`build-<platform>-<jobId>`),
+  needed for the timeout to reliably kill the right container and for the
+  upcoming persistent-queue recovery work to find a still-running build's
+  container after a restart.
+
 ## [0.2.0] - 2026-09-21
 
 ### Changed
@@ -49,5 +73,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   unguessable artifact download tokens, and a real Clocker release build
   completed end-to-end through the generic worker.
 
+[0.3.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.3.0
 [0.2.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.2.0
 [0.1.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.1.0
