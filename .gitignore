@@ -1,0 +1,17 @@
+node_modules/
+
+# Runtime state — never commit build output, uploads, or the database.
+data/
+builds/
+uploads/
+jobs/
+
+# Secrets
+.env
+.env.local
+*.pem
+*.key
+
+# Editor/OS
+.DS_Store
+Thumbs.db

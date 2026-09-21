@@ -1,0 +1,14 @@
+{
+  "name": "android-build-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "worker": "node src/worker/index.mjs",
+    "api": "node src/api/server.mjs"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.11.1",
+    "express": "^5.2.1"
+  }
+}
