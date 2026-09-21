@@ -29,7 +29,12 @@ fi
 TARGET_REF="${1:-}"
 
 echo "== Snapshotting database and .env before update =="
-node scripts/backup.mjs
+# Run inside the (still-running, pre-update) api container rather than
+# bare on the host: backup.mjs needs better-sqlite3's native module,
+# which this host was never expected to have installed on its own — only
+# the container's image builds it. -T disables TTY allocation since this
+# runs non-interactively.
+docker compose exec -T api node scripts/backup.mjs
 
 if [[ -n "$TARGET_REF" ]]; then
   echo "== Fetching and checking out $TARGET_REF =="

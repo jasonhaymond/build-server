@@ -5,6 +5,32 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.1] - 2026-09-21
+
+### Fixed
+
+- `scripts/backup.mjs` (and therefore `scripts/update.sh`'s pre-update
+  snapshot, and any cron job calling it directly) now runs **inside the
+  `api` container** (`docker compose exec -T api node scripts/backup.mjs`)
+  instead of bare on the host. The host was never expected to have
+  `node_modules` installed for the Compose deployment path — only the
+  container's own image builds `better-sqlite3`'s native module — so a
+  bare host invocation always failed with `Cannot find package
+  'better-sqlite3'`. This also removes a latent ABI-mismatch risk from
+  ever building that native module directly against the host's own
+  OS/architecture. The CLI path and the web UI's "Back up now" button are
+  now one identical code path instead of two.
+- Added the missing `./backups:/app/backups` bind mount to
+  `docker-compose.yml`. Without it, a backup taken from inside the
+  container (which the point above now makes the *only* path) wrote into
+  the container's own writable layer and was lost the moment the
+  container was next recreated — which every `docker compose up -d`
+  during an update always does. Backups now correctly land in `backups/`
+  on the host, survivable across updates and copyable off-host per the
+  project's backup standard.
+- `README.md`'s `npm run migrate` example had the same host-vs-container
+  gap; updated to `docker compose exec -T api npm run migrate`.
+
 ## [1.2.0] - 2026-09-21
 
 ### Changed

@@ -165,8 +165,9 @@ scripts/update.sh v1.2.3       # or deploy/roll back to a specific tag
 ```
 
 The script refuses to run over uncommitted local changes, takes a database
-+ `.env` snapshot first (`scripts/backup.mjs`) regardless of any other
-backup schedule, rebuilds the Android image, restarts the API via Compose,
++ `.env` snapshot first (`scripts/backup.mjs`, run inside the still-running
+api container — see Backups below) regardless of any other backup
+schedule, rebuilds the Android image, restarts the API via Compose,
 and polls `/health` before declaring success. It also tags both rebuilt
 images with the running `package.json` version
 (`build-server-android:vX.Y.Z`, `build-server-api:vX.Y.Z`) alongside
@@ -190,7 +191,7 @@ with `--profile web` left it running, untouched.
 ```bash
 cd build-server
 git status                                      # nothing uncommitted to lose
-node scripts/backup.mjs                         # snapshot first, always
+docker compose exec -T api node scripts/backup.mjs   # snapshot first, always
 git pull                                        # or: git checkout vX.Y.Z
 docker build -t build-server-android:latest .
 docker compose build
@@ -222,8 +223,15 @@ after checking what changed, not something the script guesses for you.
 ## Backups
 
 ```bash
-node scripts/backup.mjs
+docker compose exec -T api node scripts/backup.mjs
 ```
+
+Run inside the `api` container (not bare on the host) — `backup.mjs`
+needs `better-sqlite3`'s native module, which only the container's own
+image builds; the host was never expected to have `node_modules`
+installed on its own for the Compose deployment path. This is also
+exactly what the web UI's "Back up now" button does under the hood, so
+the CLI and the button are now one identical code path, not two.
 
 This is the manual-fallback tier the project's backup standard allows for
 a smaller project (a full encrypted/deduplicated setup like BorgBackup is
@@ -238,7 +246,8 @@ It:
   not `package.json` on disk — `backups/build-server-vX.Y.Z-<timestamp>.tar.gz`.
 - Is also run automatically, unconditionally, by `scripts/update.sh`
   before every update — independent of whatever scheduled backup you set
-  up separately (e.g. a cron job calling `node scripts/backup.mjs`).
+  up separately (e.g. a cron job calling
+  `docker compose exec -T api node scripts/backup.mjs`).
 
 **This only protects you if the backups leave the host.** Copy the
 `backups/` directory off-host (a separate backup server over SSH, object
@@ -277,9 +286,9 @@ between that snapshot and the failure is lost — the RPO is however often
 you actually run `scripts/backup.mjs` on a schedule (cron) plus whatever
 `scripts/update.sh` captured on the last update. There's no scheduled
 backup wired up by default yet; add one (e.g. a nightly cron calling
-`node scripts/backup.mjs`, followed by copying `backups/` off-host) if
-this deployment holds anything you can't afford to lose since the last
-manual run.
+`docker compose exec -T api node scripts/backup.mjs`, followed by copying
+`backups/` off-host) if this deployment holds anything you can't afford
+to lose since the last manual run.
 
 ## Web UI (optional)
 
@@ -338,7 +347,8 @@ version vs. the latest GitHub tag (`GITHUB_REPO`), a build-metrics
 summary, a tail of the API's own operational log
 (`GET /api/v1/system/logs`), a **Back up now** button
 (`POST /api/v1/system/backup`, runs the same `runBackup()` logic as
-`scripts/backup.mjs` — one implementation, two callers), and an
+`scripts/backup.mjs` — one implementation, two callers, and now the exact
+same in-container invocation either way), and an
 **Update now** button. This is the in-app equivalent of running
 `scripts/update.sh`/`scripts/backup.mjs` over SSH, per the project's
 built-in-update-visibility and backups standards — same scripts, same
@@ -455,10 +465,24 @@ do anything, or the sibling container exits immediately** — check
 the few seconds before it cleans itself up — re-trigger and check
 quickly, or temporarily drop `--rm` from `src/system/update.mjs` while
 debugging). Common cause: uncommitted changes on the host blocking
-`scripts/update.sh`'s own guard — check `git status` there.
+`scripts/update.sh`'s own guard — check `git status` there — including an
+untracked stray file (e.g. a manually-made `.env.bak`) sitting in the
+checkout, since `git status --porcelain` treats untracked files the same
+as modified ones.
 
-**`node scripts/backup.mjs` (or the Admin page's backup button) fails with
-`tar: ...`** — if you're testing this on Windows, bsdtar interprets a
+**`node scripts/backup.mjs` fails with `Cannot find package
+'better-sqlite3'`** — it was run bare on the host instead of inside the
+`api` container. The host is never expected to have `node_modules`
+installed for the Compose deployment path (only the container's own
+image builds it, and building `better-sqlite3`'s native module directly
+on the host risks an ABI mismatch with the container's base image
+anyway) — always run it as
+`docker compose exec -T api node scripts/backup.mjs`, which is what
+`scripts/update.sh` and the Admin page's button both do.
+
+**`docker compose exec -T api node scripts/backup.mjs` (or the Admin
+page's backup button) fails with `tar: ...`** — if you're testing this on
+Windows, bsdtar interprets a
 `C:\...` path's drive-letter colon as a remote-host spec
 (`tar (child): Cannot connect to C: resolve failed`). This doesn't happen
 on the real Linux deployment target; it's a Windows-dev-machine-only

@@ -26,6 +26,12 @@ services:
       - ./builds:/app/builds
       - ./uploads:/app/uploads
       - ./jobs:/app/jobs
+      # Without this, a backup taken from inside the container (the "Back
+      # up now" button, or scripts/update.sh's pre-update snapshot) writes
+      # into the container's own writable layer and is lost the moment
+      # this container is recreated — which `docker compose up -d`
+      # (the very next step of an update) always does.
+      - ./backups:/app/backups
       # Read-only: env_file already injects these as process env vars;
       # the file itself needs to be visible too so a backup taken from
       # inside the container (the web UI's "Back up now" button) can

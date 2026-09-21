@@ -9,7 +9,7 @@ It accepts Android/Expo/React Native source and build configuration,
 builds it in an isolated Docker container, stores the resulting APK/AAB,
 and returns a permanent public download URL.
 
-**Current version:** 1.2.0 — see [CHANGELOG.md](CHANGELOG.md) for release history.
+**Current version:** 1.2.1 — see [CHANGELOG.md](CHANGELOG.md) for release history.
 
 Architecture rationale, the source/build request schema, and the security
 model live in [PROJECT-SCOPE.md](PROJECT-SCOPE.md) (the original handoff
@@ -105,8 +105,11 @@ Port 8080 must never be exposed directly to the Internet.
 ```bash
 scripts/update.sh          # snapshot, pull, rebuild, restart, verify — one command
 scripts/update.sh v1.2.3   # or deploy/roll back to a specific tag
-node scripts/backup.mjs    # database + .env snapshot, on demand
-npm run migrate            # explicit migration run (also happens automatically on boot)
+
+# Both run inside the api container (needs its bundled better-sqlite3
+# native module) — not bare on the host:
+docker compose exec -T api node scripts/backup.mjs   # database + .env snapshot, on demand
+docker compose exec -T api npm run migrate           # explicit migration run (also happens automatically on boot)
 ```
 
 `scripts/update.sh` also tags the rebuilt images with the running
