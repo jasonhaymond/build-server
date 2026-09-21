@@ -240,3 +240,37 @@ backup wired up by default yet; add one (e.g. a nightly cron calling
 `node scripts/backup.mjs`, followed by copying `backups/` off-host) if
 this deployment holds anything you can't afford to lose since the last
 manual run.
+
+## Web UI (optional)
+
+`web/` is a plain static site (no build step, no framework) that talks to
+this API over plain HTTP `fetch()` — it never touches Gradle, Docker,
+SQLite, or build directories directly, only the same API any other client
+uses. It's meant to be served by Caddy as its **own** site, not by the API
+process.
+
+Because it's a different origin from the API, the API needs to be told to
+allow it via CORS — set `WEB_UI_ORIGIN` in `.env` to the exact origin the
+web UI is served from (e.g. `https://builds-ui.example.com`), then
+`docker compose up -d` (or restart the non-Compose process) to pick it up.
+Leaving it unset means no cross-origin access at all — never set it to a
+wildcard.
+
+Adding the Caddy site block is a manual, system-level step (this repo
+doesn't own Caddy's config):
+
+```caddyfile
+builds-ui.example.com {
+    root * /path/to/build-server/web
+    file_server
+}
+```
+
+Sign-in is a manually-pasted API key (created with
+`scripts/create-api-key.mjs`), kept only in that browser tab's session
+storage — cleared on sign-out or tab close, never sent anywhere but this
+API. This is a deliberate, documented simplification for now, not real
+user accounts/sessions — PROJECT-SCOPE.md itself describes those as
+"Eventually," with no concrete design given (no user table, no password
+policy). A key with `build:read:any` sees every client's builds in the
+dashboard, matching its API-level access; a scoped key only sees its own.

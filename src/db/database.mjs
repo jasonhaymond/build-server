@@ -419,3 +419,38 @@ export function getAppMeta() {
     WHERE id = 1
   `).get();
 }
+
+// Powers the web UI's dashboard. `includeAll` is for build:read:any keys —
+// everyone else only ever sees their own builds, enforced here rather
+// than filtered client-side.
+export function listBuilds({ apiKeyId, includeAll, limit, offset }) {
+  const baseColumns = `
+    id,
+    project_name AS projectName,
+    status,
+    submitted_at AS submittedAt,
+    started_at AS startedAt,
+    completed_at AS completedAt,
+    platform,
+    variant,
+    artifact_type AS artifactType,
+    failure_reason AS failureReason
+  `;
+
+  if (includeAll) {
+    return db.prepare(`
+      SELECT ${baseColumns}
+      FROM builds
+      ORDER BY submitted_at DESC
+      LIMIT ? OFFSET ?
+    `).all(limit, offset);
+  }
+
+  return db.prepare(`
+    SELECT ${baseColumns}
+    FROM builds
+    WHERE api_key_id = ? OR api_key_id IS NULL
+    ORDER BY submitted_at DESC
+    LIMIT ? OFFSET ?
+  `).all(apiKeyId, limit, offset);
+}

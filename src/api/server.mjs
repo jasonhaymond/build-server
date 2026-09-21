@@ -25,6 +25,7 @@ import {
   getBuild,
   getBuildMetrics,
   listApiKeys,
+  listBuilds,
   upsertAppMeta,
 } from "../db/database.mjs";
 import { createLogger } from "../logging/logger.mjs";
@@ -49,6 +50,31 @@ try {
   console.error(error.message);
   process.exit(1);
 }
+
+// The web UI (web/) is typically served from its own Caddy site, a
+// different origin than this API — restricted to explicitly-known
+// origins (WEB_UI_ORIGIN), never a wide-open wildcard, per the project's
+// security baseline. Empty/unset means no cross-origin access at all.
+const allowedOrigins = (process.env.WEB_UI_ORIGIN ?? "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+app.use((req, res, next) => {
+  const origin = req.get("origin");
+
+  if (origin && allowedOrigins.includes(origin)) {
+    res.set("Access-Control-Allow-Origin", origin);
+    res.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
+    res.set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+  }
+
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(204);
+  }
+
+  next();
+});
 
 app.use(express.json({ limit: "1mb" }));
 
@@ -148,6 +174,7 @@ function createBuildId() {
 function sanitizeBuildForResponse(build) {
   return {
     id: build.id,
+    projectName: build.projectName ?? null,
     status: build.status,
     submittedAt: build.submittedAt,
     startedAt: build.startedAt ?? null,
@@ -248,6 +275,20 @@ app.post("/api/v1/builds", requireScope("build:create"), (req, res) => {
     id,
     status: build.status,
   });
+});
+
+app.get("/api/v1/builds", requireScope("build:read"), (req, res) => {
+  const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
+  const offset = Math.max(Number(req.query.offset) || 0, 0);
+
+  const builds = listBuilds({
+    apiKeyId: req.apiKey.id,
+    includeAll: hasScope(req.apiKey, "build:read:any"),
+    limit,
+    offset,
+  }).map(sanitizeBuildForResponse);
+
+  return res.json({ builds, limit, offset });
 });
 
 app.get("/api/v1/builds/:id", requireBuildAccess("build:read"), (req, res) => {

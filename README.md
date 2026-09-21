@@ -9,7 +9,7 @@ It accepts Android/Expo/React Native source and build configuration,
 builds it in an isolated Docker container, stores the resulting APK/AAB,
 and returns a permanent public download URL.
 
-**Current version:** 0.9.0 — see [CHANGELOG.md](CHANGELOG.md) for release history.
+**Current version:** 0.10.0 — see [CHANGELOG.md](CHANGELOG.md) for release history.
 
 Full architecture, API reference, security model, and the project roadmap
 live in [PROJECT-SCOPE.md](PROJECT-SCOPE.md) — read that first for anything
@@ -108,15 +108,26 @@ update, backup, and restore walkthrough, and
 [PROJECT-SCOPE.md](PROJECT-SCOPE.md) for the reverse-proxy config, host
 firewall rules, and architecture.
 
+## Web UI (optional)
+
+`web/` is a plain static dashboard (no build step) — submit builds, watch
+status, view logs and artifacts, cancel a running build. It's served by
+Caddy as its own site, separate from the API, so it needs `WEB_UI_ORIGIN`
+set in `.env` for CORS. Sign-in is a manually-pasted API key kept only in
+that browser tab's session storage. See
+[docs/deployment.md](docs/deployment.md#web-ui-optional) for the Caddy
+config and setup.
+
 ## Status
 
-Actively-hardening (v0.9.0): persistent build queue with restart recovery,
-artifact metadata, API key scopes, build cancellation, retention cleanup,
-multi-tenant isolation, structured logging, real health checks, Docker
-Compose containerization, an automated test suite/CI, and setup/update/
-backup tooling are all in place. See PROJECT-SCOPE.md's "Current Known
-Limitations" section for what's still ahead (a web UI, chiefly) before
-relying on this for anything beyond internal/trusted use.
+Actively-hardening (v0.10.0): persistent build queue with restart
+recovery, artifact metadata, API key scopes, build cancellation, retention
+cleanup, multi-tenant isolation, structured logging, real health checks,
+Docker Compose containerization, an automated test suite/CI, setup/update/
+backup tooling, and a web UI are all in place. See PROJECT-SCOPE.md's
+"Current Known Limitations" section for what's still open (production
+monitoring/alerting, CI-driven deploys) before relying on this beyond
+internal/trusted use.
 
 ## Running tests
 

@@ -61,6 +61,51 @@ describe("build submission validation", () => {
     expect(res.status).toBe(202);
     expect(res.body.id).toMatch(/^bld_/);
   });
+
+  it("returns the project name in the build's status response", async () => {
+    const key = createTestApiKey();
+    const submit = await request(app)
+      .post("/api/v1/builds")
+      .set("Authorization", `Bearer ${key}`)
+      .send(sampleJob({ project: { name: "NamedProject", source: sampleJob().project.source } }));
+
+    const res = await request(app)
+      .get(`/api/v1/builds/${submit.body.id}`)
+      .set("Authorization", `Bearer ${key}`);
+
+    expect(res.body.projectName).toBe("NamedProject");
+  });
+});
+
+describe("build listing", () => {
+  it("lists only the caller's own builds by default", async () => {
+    const keyA = createTestApiKey({ name: "list-a", scopes: ["build:create", "build:read"] });
+    const keyB = createTestApiKey({ name: "list-b", scopes: ["build:create", "build:read"] });
+
+    const submitted = await request(app)
+      .post("/api/v1/builds")
+      .set("Authorization", `Bearer ${keyA}`)
+      .send(sampleJob());
+
+    const listA = await request(app)
+      .get("/api/v1/builds")
+      .set("Authorization", `Bearer ${keyA}`);
+    expect(listA.status).toBe(200);
+    expect(listA.body.builds.some((b) => b.id === submitted.body.id)).toBe(true);
+
+    const listB = await request(app)
+      .get("/api/v1/builds")
+      .set("Authorization", `Bearer ${keyB}`);
+    expect(listB.body.builds.some((b) => b.id === submitted.body.id)).toBe(false);
+  });
+
+  it("requires build:read", async () => {
+    const key = createTestApiKey({ scopes: ["build:create"] });
+    const res = await request(app)
+      .get("/api/v1/builds")
+      .set("Authorization", `Bearer ${key}`);
+    expect(res.status).toBe(403);
+  });
 });
 
 describe("scopes", () => {

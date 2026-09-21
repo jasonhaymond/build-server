@@ -5,6 +5,50 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.10.0] - 2026-09-21
+
+### Added
+
+- Web UI (`web/`): a plain static dashboard (no build step, no framework —
+  vanilla ES modules + `fetch()`) covering PROJECT-SCOPE.md's described
+  feature set — build list with status, a submit-build form, and a build
+  detail view (logs, artifacts with permanent download links, cancel). It
+  never touches Gradle, Docker, SQLite, or build directories directly,
+  only the same HTTP API any other client uses.
+- `GET /api/v1/builds` (paginated, `build:read` scoped): needed for the
+  dashboard's list view and not previously exposed — scoped to the
+  caller's own builds unless it also holds `build:read:any`.
+- CORS support (`WEB_UI_ORIGIN` env var): restricted to explicitly-known
+  origins, never a wildcard, per the project's security baseline — needed
+  since the web UI is served from its own Caddy site, a different origin
+  than the API.
+- `docs/deployment.md` and `README.md` updated with the web UI's setup
+  (the Caddy site block, `WEB_UI_ORIGIN`) and its documented
+  simplification: v1 sign-in is a manually-pasted API key in
+  session storage, not real user accounts — PROJECT-SCOPE.md itself
+  describes those as "Eventually" with no concrete design given.
+
+### Fixed
+
+- `sanitizeBuildForResponse` never included `projectName` in any API
+  response, in any version of this project going back to the original
+  prototype — every build status/list response showed only the raw build
+  ID, never the human-readable project name that was already stored in
+  the database. Found by actually looking at the dashboard in a real
+  browser rather than only reading the response shape in code; a
+  regression test now covers it.
+- The header layout broke at mobile width (elements wrapped mid-word,
+  overlapping the nav links) — found the same way, by screenshotting a
+  375px viewport rather than assuming the flexbox layout would reflow
+  correctly. Fixed with explicit wrap behavior in `web/style.css`.
+
+Verified with a real headless-Chromium session (not just code review)
+against a live API and a separately-served static site (genuinely
+cross-origin, matching the production Caddy topology): sign-in, dashboard
+listing, build submission end-to-end, build detail with real logs, and
+cancellation UI — at both desktop (1280px) and mobile (375px) widths, with
+zero browser console errors.
+
 ## [0.9.0] - 2026-09-21
 
 ### Added
@@ -301,6 +345,7 @@ through the live HTTP API (submit → building → failed, with the persisted
   unguessable artifact download tokens, and a real Clocker release build
   completed end-to-end through the generic worker.
 
+[0.10.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.10.0
 [0.9.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.9.0
 [0.8.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.8.0
 [0.7.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.7.0
