@@ -11,10 +11,12 @@ and returns a permanent public download URL.
 
 **Current version:** 1.0.0 — see [CHANGELOG.md](CHANGELOG.md) for release history.
 
-Full architecture, API reference, security model, and the project roadmap
-live in [PROJECT-SCOPE.md](PROJECT-SCOPE.md) — read that first for anything
-beyond local setup. See [docs/deployment.md](docs/deployment.md) for
-production deployment.
+Architecture rationale, the source/build request schema, and the security
+model live in [PROJECT-SCOPE.md](PROJECT-SCOPE.md) (the original handoff
+spec — still accurate for those, though its own status sections are
+historical). For the current, complete endpoint-by-endpoint reference,
+see [docs/api-reference.md](docs/api-reference.md). See
+[docs/deployment.md](docs/deployment.md) for production deployment.
 
 ## Requirements
 
@@ -72,9 +74,11 @@ curl -X POST http://localhost:8080/api/v1/builds \
   }'
 ```
 
-See [PROJECT-SCOPE.md](PROJECT-SCOPE.md) for the full API reference
-(build status, logs, artifacts, permanent download URLs, cancellation,
-API key management, metrics) and for the source-type/env/secrets schema.
+See [docs/api-reference.md](docs/api-reference.md) for the full endpoint
+reference (build status, logs, artifacts, permanent download URLs,
+cancellation, API key management, metrics, the admin/system endpoints)
+and [PROJECT-SCOPE.md](PROJECT-SCOPE.md) for the source-type/env/secrets
+schema in more depth.
 
 ## API keys and scopes
 

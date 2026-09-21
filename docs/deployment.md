@@ -57,13 +57,27 @@ the build server touching are also running, until that hardening lands.
   prior run) and offers to pick a different one; the manual equivalent is
   `ss -ltnp | grep :8080` or similar before assuming it's free.
 - A separate reverse proxy (Caddy is the default choice for this project)
-  terminating TLS and forwarding to this host's `PORT`. See
-  PROJECT-SCOPE.md's Reverse Proxy section for the Caddy config shape.
-  Setting up the reverse proxy is a manual step — it's system-level config
-  this repo doesn't own.
+  terminating TLS and forwarding to this host's `PORT`. This is a manual,
+  system-level step this repo doesn't own — on the separate Caddy host:
+
+  ```caddyfile
+  builds.example.com {
+      reverse_proxy 10.x.x.x:8080
+  }
+  ```
+
+  (`10.x.x.x` = this API host's LAN IP, `8080` = whatever `PORT` you
+  chose.) Caddy terminates HTTPS/TLS; the API itself needs no public TLS
+  configuration. `PUBLIC_BASE_URL` in `.env` must match the public
+  hostname (`https://builds.example.com`), not the LAN address.
 - Host firewall (`ufw` or equivalent) allowing only SSH, 80, and 443
-  externally, plus the reverse-proxy host's IP on `PORT` internally. Never
-  expose `PORT` to the Internet directly.
+  externally, plus **specifically the reverse-proxy host's IP** on `PORT`
+  internally — not the whole LAN. Example:
+  ```bash
+  sudo ufw allow from 10.x.x.x to any port 8080 proto tcp
+  ```
+  Never expose `PORT` to the Internet directly, and never allow it from
+  "anywhere" on the LAN either — only from the specific host running Caddy.
 
 ## First deploy
 
@@ -134,8 +148,8 @@ docker compose exec api node scripts/create-api-key.mjs "my-first-client"
 
 Save the printed key now — it's shown once and isn't recoverable; only its
 hash is stored. Then configure the reverse proxy (manual, system-level
-step) to forward `PUBLIC_BASE_URL`'s hostname to `10.x.x.x:PORT` on this
-host, per PROJECT-SCOPE.md's Caddy example.
+step) to forward `PUBLIC_BASE_URL`'s hostname to this host's `PORT`, per
+the Caddy example in Prerequisites above.
 
 ## Updating
 
@@ -358,3 +372,80 @@ included it. Fixed by mounting `./.env:/app/.env:ro` in
 `docker-compose.yml` — read-only, since `env_file:` already injects its
 values as environment variables; the file itself only needs to be
 *readable* for `runBackup()` to copy it into the archive.
+
+## Troubleshooting
+
+**API container exits immediately with `JOB_SECRETS_ENCRYPTION_KEY is not
+set` or `...must be a 32-byte key`** — `.env` is missing the key or it's
+malformed. Generate one and re-run: `node -e
+"console.log(require('crypto').randomBytes(32).toString('hex'))"`. This
+check runs before anything else, deliberately — better to fail loudly at
+startup than on the first build submission.
+
+**`docker compose up` succeeds but `/health` shows
+`"docker": "error: ..."`** — usually `DOCKER_GID` is wrong or unset, so
+the container's user can't read/write the mounted `/var/run/docker.sock`.
+Confirm with `getent group docker | cut -d: -f3` on the host, put that
+exact number in `.env`, and `docker compose up -d` again (a plain restart
+isn't enough — `group_add` is applied at container creation).
+
+**A build fails instantly with `Source path not found: ...`** — for a
+`directory`-type source, the path is resolved *inside the API/worker
+container's own filesystem*, not the host's. If you're testing with a
+local project, it needs to be under a directory this container already
+has mounted (e.g. copy it under `uploads/` on the host, which is
+bind-mounted into the container).
+
+**A build fails with `Git source rejected: ...`** — SSRF protection
+(`src/security/gitSource.mjs`) rejects non-HTTPS URLs and anything
+resolving to a private/loopback/link-local address by default. For a
+trusted/internal Git server or a local path, set
+`ALLOW_LOCAL_GIT_SOURCES=true` — only on deployments you actually trust
+with that, since it also allows local filesystem paths as sources.
+
+**The web UI can't sign in / dashboard shows a CORS error in the browser
+console** — `WEB_UI_ORIGIN` in `.env` must exactly match the origin the
+web UI is actually served from (scheme + host, e.g.
+`https://builds-ui.example.com`, no trailing slash), and the API must be
+restarted after changing it. If it's unset, no cross-origin request is
+allowed at all — intentional, not a bug.
+
+**The Admin page's "Update now" button returns `HOST_PROJECT_DIR and
+API_IMAGE must be set`** — this only works for Docker Compose deployments
+where both are actually configured. `API_IMAGE` is set directly in
+`docker-compose.yml` (not `.env`) and should already be there; if you
+changed the compose file, make sure it's still set. `HOST_PROJECT_DIR`
+must be the deployment directory's real, absolute path *as the host
+sees it* — check it against `pwd` on the host, not a path copied from
+somewhere else.
+
+**`scripts/update.sh` (or the Admin page's update button) doesn't seem to
+do anything, or the sibling container exits immediately** — check
+`docker ps -a --filter name=build-server-update-` for its exit code and
+`docker logs <name>` for output (it uses `--rm`, so this only works in
+the few seconds before it cleans itself up — re-trigger and check
+quickly, or temporarily drop `--rm` from `src/system/update.mjs` while
+debugging). Common cause: uncommitted changes on the host blocking
+`scripts/update.sh`'s own guard — check `git status` there.
+
+**`node scripts/backup.mjs` (or the Admin page's backup button) fails with
+`tar: ...`** — if you're testing this on Windows, bsdtar interprets a
+`C:\...` path's drive-letter colon as a remote-host spec
+(`tar (child): Cannot connect to C: resolve failed`). This doesn't happen
+on the real Linux deployment target; it's a Windows-dev-machine-only
+artifact, documented in `CHANGELOG.md`.
+
+**A build never leaves `queued`** — only one build runs at a time by
+design (`PROJECT-SCOPE.md`'s "Build concurrency is currently effectively
+one build"). Check `GET /api/v1/system` (or the Admin page) for
+`activeBuild`/`queuedBuilds` — if a build's been `building` far longer
+than expected, its container may be stuck; `POST
+/api/v1/builds/:id/cancel` on it to free the queue.
+
+**After a restart, a build that was `building` shows `failed` with
+`"Interrupted by server restart"`** — this is `src/queue/recovery.mjs`
+working as designed, not a bug: it only reattaches to a build whose
+Docker container is still actually running (found by its deterministic
+name, `build-<platform>-<buildId>`). If the container is gone too (e.g.
+the whole host rebooted, not just the API), there's nothing left to
+reattach to, so it's correctly marked failed rather than silently lost.

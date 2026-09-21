@@ -1,11 +1,15 @@
 # Android Build Server — Project Scope & Handoff
 
 > **Historical document.** This is the original handoff spec this project
-> was built from — kept as-is for the architecture rationale, full API
-> reference, and security-model discussion, which are still accurate. Its
-> "Current Known Limitations" and status sections describe the state at
-> handoff time and are now stale — most are resolved. For what's actually
-> built and how to run it today, see [README.md](README.md),
+> was built from — kept as-is for the architecture rationale, the source/
+> build request schema, and the security-model discussion, which are
+> still accurate. Its API section predates scopes, `whoami`, the build
+> list endpoint, and everything under `/api/v1/system` — for the current,
+> complete endpoint reference, see
+> [docs/api-reference.md](docs/api-reference.md) instead. Its "Current
+> Known Limitations" and status sections describe the state at handoff
+> time and are now stale — most are resolved. For what's actually built
+> and how to run it today, see [README.md](README.md),
 > [CHANGELOG.md](CHANGELOG.md), and [docs/deployment.md](docs/deployment.md).
 
 This document is the handoff specification for the self-hosted generic Android build service.
