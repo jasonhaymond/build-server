@@ -209,7 +209,7 @@ Scope: `artifact:download`.
     {
       "filename": "Example-release.apk",
       "size": 95600000,
-      "downloadUrl": "https://builds.example.com/download/<token>/Example-release.apk"
+      "downloadUrl": "https://builds-api.example.com/download/<token>/Example-release.apk"
     }
   ]
 }

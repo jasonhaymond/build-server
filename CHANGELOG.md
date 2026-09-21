@@ -5,6 +5,27 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] - 2026-09-21
+
+### Added
+
+- In-app **Help** page in the web UI (`#/help`), reachable both signed in
+  (in the main nav) and signed out (linked from the sign-in page) —
+  covers sign-in, scopes, the dashboard's status meanings, submitting a
+  build, the build detail page, and the Admin page, from a user's
+  perspective rather than a deployer's. Closes a real gap: the web UI
+  previously had zero in-app usage guidance beyond two sentences on the
+  sign-in screen.
+- `docs/using-the-web-ui.md`: the fuller repo-based walkthrough the
+  in-app Help page links out to, for anyone who wants more than the
+  condensed in-app version.
+- Cross-links from `README.md` and `docs/deployment.md`'s Web UI
+  sections to both.
+
+Verified in a real browser: the Help page renders correctly signed in
+and signed out, the "Back to sign in" link works, and the mobile layout
+(375px) reads cleanly with no overflow — zero console errors throughout.
+
 ## [1.0.0] - 2026-09-21
 
 A full pass applying the project's global development standards

@@ -61,15 +61,18 @@ the build server touching are also running, until that hardening lands.
   system-level step this repo doesn't own — on the separate Caddy host:
 
   ```caddyfile
-  builds.example.com {
+  builds-api.example.com {
       reverse_proxy 10.x.x.x:8080
   }
   ```
 
   (`10.x.x.x` = this API host's LAN IP, `8080` = whatever `PORT` you
-  chose.) Caddy terminates HTTPS/TLS; the API itself needs no public TLS
-  configuration. `PUBLIC_BASE_URL` in `.env` must match the public
-  hostname (`https://builds.example.com`), not the LAN address.
+  chose. The naming convention used throughout these docs: the web UI
+  gets the primary domain, `builds.<domain>` — see Web UI below — and the
+  API gets a distinguishing subdomain, `builds-api.<domain>`.) Caddy
+  terminates HTTPS/TLS; the API itself needs no public TLS configuration.
+  `PUBLIC_BASE_URL` in `.env` must match the public hostname
+  (`https://builds-api.example.com`), not the LAN address.
 - Host firewall (`ufw` or equivalent) allowing only SSH, 80, and 443
   externally, plus **specifically the reverse-proxy host's IP** on `PORT`
   internally — not the whole LAN. Example:
@@ -104,7 +107,7 @@ Edit `.env`:
 
 - `PORT` — pick one that's free on this host (see Prerequisites).
 - `PUBLIC_BASE_URL` — the public HTTPS URL the reverse proxy will expose
-  this service at (e.g. `https://builds.example.com`).
+  this service at (e.g. `https://builds-api.example.com`).
 - `JOB_SECRETS_ENCRYPTION_KEY` — generate with:
   ```bash
   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
@@ -270,6 +273,12 @@ manual run.
 
 ## Web UI (optional)
 
+This section is about *deploying* the web UI. For what it's like to
+actually use — the dashboard, submitting a build, the Admin page — see
+[using-the-web-ui.md](using-the-web-ui.md), or the UI's own in-app Help
+page, which covers the same ground and is reachable with or without
+being signed in.
+
 `web/` is a plain static site (no build step, no framework) that talks to
 this API over plain HTTP `fetch()` — it never touches Gradle, Docker,
 SQLite, or build directories directly, only the same API any other client
@@ -278,16 +287,17 @@ process.
 
 Because it's a different origin from the API, the API needs to be told to
 allow it via CORS — set `WEB_UI_ORIGIN` in `.env` to the exact origin the
-web UI is served from (e.g. `https://builds-ui.example.com`), then
-`docker compose up -d` (or restart the non-Compose process) to pick it up.
-Leaving it unset means no cross-origin access at all — never set it to a
-wildcard.
+web UI is served from (e.g. `https://builds.example.com` — the primary
+domain; the API gets the `builds-api.<domain>` subdomain, per the
+Prerequisites section above), then `docker compose up -d` (or restart the
+non-Compose process) to pick it up. Leaving it unset means no
+cross-origin access at all — never set it to a wildcard.
 
 Adding the Caddy site block is a manual, system-level step (this repo
 doesn't own Caddy's config):
 
 ```caddyfile
-builds-ui.example.com {
+builds.example.com {
     root * /path/to/build-server/web
     file_server
 }
@@ -406,7 +416,7 @@ with that, since it also allows local filesystem paths as sources.
 **The web UI can't sign in / dashboard shows a CORS error in the browser
 console** — `WEB_UI_ORIGIN` in `.env` must exactly match the origin the
 web UI is actually served from (scheme + host, e.g.
-`https://builds-ui.example.com`, no trailing slash), and the API must be
+`https://builds.example.com`, no trailing slash), and the API must be
 restarted after changing it. If it's unset, no cross-origin request is
 allowed at all — intentional, not a bug.
 

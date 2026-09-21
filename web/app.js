@@ -21,6 +21,7 @@ function layout(activeRoute, bodyHtml) {
     ["#/", "Dashboard"],
     ["#/submit", "Submit build"],
     ["#/admin", "Admin"],
+    ["#/help", "Help"],
   ];
 
   const nav = links
@@ -69,6 +70,9 @@ async function renderSignIn() {
           <input id="apiKey" type="password" placeholder="abs_..." />
         </div>
         <button class="primary" id="signInBtn">Sign in</button>
+        <p class="muted" style="margin-top: 12px;">
+          <a class="row-link" href="#/help">Need help?</a>
+        </p>
       </div>
     </main>
   `;
@@ -484,14 +488,108 @@ async function renderAdmin() {
   await load();
 }
 
+function renderHelpContent() {
+  return `
+    <h2>Help</h2>
+    <div class="card">
+      <h3>Signing in</h3>
+      <p>You need an <strong>API base URL</strong> (where the build-server
+        API itself lives, not this web UI's own address) and an
+        <strong>API key</strong> (starts with <code>abs_</code>) from
+        whoever administers this deployment. The key is shown to them
+        once when created and can't be recovered later — if you don't
+        have one, ask for a new one rather than trying to find an old one.</p>
+      <p class="muted">The key is stored only in this browser tab's
+        session storage — never sent anywhere but this API, and cleared
+        on sign out or when you close the tab.</p>
+    </div>
+    <div class="card">
+      <h3>What you can do</h3>
+      <p>Depends entirely on what your key was scoped for. A "missing
+        required scope" error means that action isn't part of what your
+        key can do — not a bug. Ask your admin if you need more access.</p>
+    </div>
+    <div class="card">
+      <h3>Dashboard</h3>
+      <p>Lists builds — yours, or every client's if your key allows it.
+        Click a project name for details. Refreshes automatically every
+        5 seconds.</p>
+      <table>
+        <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td>${statusBadge("queued")}</td><td>Waiting its turn — only one build runs at a time.</td></tr>
+          <tr><td>${statusBadge("building")}</td><td>Running right now.</td></tr>
+          <tr><td>${statusBadge("completed")}</td><td>Done — check its Artifacts.</td></tr>
+          <tr><td>${statusBadge("failed")}</td><td>Something went wrong — check its Logs.</td></tr>
+          <tr><td>${statusBadge("cancelled")}</td><td>Stopped before finishing.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card">
+      <h3>Submitting a build</h3>
+      <p>Git sources must be <code>https://</code> URLs (non-HTTPS and
+        internal addresses are rejected as a security measure unless this
+        deployment specifically allows them). Use "Project root" only for
+        a monorepo where the Android project isn't at the repository's
+        top level. Secrets are encrypted while queued and masked
+        everywhere afterward — there's no way to view one back out once
+        submitted.</p>
+    </div>
+    <div class="card">
+      <h3>Build detail</h3>
+      <p>Artifacts appear here once a build completes, as a direct,
+        permanent download link — no sign-in needed to use it, so treat
+        the link itself as a credential. Logs show the build's real
+        output; the failure reason (if any) is just a short summary.
+        Cancel is only available while a build is queued or building.</p>
+    </div>
+    <div class="card">
+      <h3>Admin page</h3>
+      <p>Requires admin-level access. Shows the running version and lets
+        you trigger a real update or backup, see the build queue, and
+        read the service's own log. Update now redeploys the live
+        service and asks for confirmation first; Back up now is
+        non-destructive.</p>
+    </div>
+    <p class="muted">
+      Full walkthrough:
+      <a href="https://github.com/jasonhaymond/build-server/blob/master/docs/using-the-web-ui.md">docs/using-the-web-ui.md</a>
+      · API reference:
+      <a href="https://github.com/jasonhaymond/build-server/blob/master/docs/api-reference.md">docs/api-reference.md</a>
+    </p>
+  `;
+}
+
+function renderHelp() {
+  stopDashboardPolling();
+
+  if (getApiKey()) {
+    layout("#/help", renderHelpContent());
+    return;
+  }
+
+  root.innerHTML = `
+    <main style="max-width: 640px; margin: 40px auto;">
+      <p><a class="row-link" href="#/">&larr; Back to sign in</a></p>
+      ${renderHelpContent()}
+    </main>
+  `;
+}
+
 function renderRoute() {
+  const hash = window.location.hash || "#/";
+
+  if (hash === "#/help") {
+    renderHelp();
+    return;
+  }
+
   if (!getApiKey()) {
     stopDashboardPolling();
     renderSignIn();
     return;
   }
 
-  const hash = window.location.hash || "#/";
   const buildMatch = hash.match(/^#\/builds\/(.+)$/);
 
   if (hash === "#/submit") {

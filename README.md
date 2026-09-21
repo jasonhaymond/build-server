@@ -136,7 +136,10 @@ sibling container spawned over the same Docker socket the build workers
 already use, a "Back up now" button (same `scripts/backup.mjs` logic), a
 build-metrics summary, and a tail of the API's own operational log.
 Signing in only needs a *valid* key, not any particular scope, so an
-admin-only key isn't locked out. See
+admin-only key isn't locked out. The UI has its own in-app **Help** page
+(reachable signed in or out) covering all of this from a user's
+perspective; see [docs/using-the-web-ui.md](docs/using-the-web-ui.md) for
+the full walkthrough, or
 [docs/deployment.md](docs/deployment.md#web-ui-optional) for the Caddy
 config, `GITHUB_REPO`/`API_IMAGE` setup, and the update-trigger's
 architecture.
