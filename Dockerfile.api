@@ -1,0 +1,30 @@
+# Docker-outside-of-Docker: this image only needs the docker CLI client to
+# talk to the host daemon over a mounted socket, not a full Docker install.
+FROM docker:27-cli AS docker-cli
+
+FROM node:20-slim
+
+# git: needed for git-source builds. ca-certificates: needed for HTTPS
+# git clones and npm installs run by the worker/build tooling.
+# python3/make/g++: needed to build better-sqlite3's native module.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       git ca-certificates python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
+COPY src ./src
+COPY scripts ./scripts
+
+ENV NODE_ENV=production
+
+# No EXPOSE — the app binds to $PORT directly (set via .env), and the
+# actual host<->container port mapping lives in docker-compose.yml.
+
+CMD ["node", "src/api/server.mjs"]

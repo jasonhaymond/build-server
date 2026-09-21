@@ -5,6 +5,51 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] - 2026-09-21
+
+### Added
+
+- Docker Compose containerization of the API (`Dockerfile.api`,
+  `docker-compose.yml`). The container talks to the **host's** Docker
+  daemon over a mounted `/var/run/docker.sock` (Docker-outside-of-Docker)
+  so it can still launch isolated Android build containers — the
+  privilege tradeoff this implies is documented plainly in
+  `docs/deployment.md` rather than glossed over.
+- `HOST_PROJECT_DIR` env var + `src/worker/docker.mjs`: the worker now
+  resolves a build's Docker bind-mount source against the **host**
+  filesystem path, not its own container-internal path — the daemon it
+  talks to over the socket only understands host paths.
+- `BUILD_CONTAINER_UID`/`BUILD_CONTAINER_GID` env vars replace deriving
+  the Android build container's `--user` from the API process's own
+  UID/GID, which stopped being meaningful once the API itself runs in a
+  container (root, or a service account) rather than as a specific host user.
+- The Android build image is renamed `build-server-android:latest`
+  (was `android-build-server:latest`), matching the project's own rename —
+  future platforms get their own `build-server-<platform>:latest` image.
+- `docs/deployment.md`: first deploy and update walkthrough for the
+  Compose-based setup, plus the DooD tradeoff write-up.
+
+### Fixed
+
+- `docker-compose.yml`'s port mapping assumed the container always
+  listens on a fixed internal port; the app actually binds directly to
+  `$PORT`, so a non-default `PORT` silently broke the mapping. Both sides
+  of the mapping now use `${PORT:-8080}` consistently.
+
+Verified: `Dockerfile.api` builds; the container's `docker` CLI reaches
+the host daemon over the mounted socket (`docker version`); the full
+Compose stack starts and `/health` reports real `ok` checks for both
+SQLite and the Docker daemon from inside the container; a build submitted
+through the containerized API runs the worker and reaches a real nested
+`docker run` invocation with the correct container name, image, masked
+env, and UID/GID. `resolveHostBuildDir`'s path construction was verified
+directly inside a real Linux container against a proper POSIX host path
+(the actual deployment target). A live nested-mount test on this Windows
+dev machine hit a Windows-only artifact — a `C:/...` drive-letter path's
+colon collides with Docker's `SRC:DST:MODE` `-v` syntax — which doesn't
+apply to the real Linux target and isn't a code defect; noted here rather
+than silently glossed over.
+
 ## [0.6.0] - 2026-09-21
 
 ### Added
@@ -181,6 +226,7 @@ through the live HTTP API (submit → building → failed, with the persisted
   unguessable artifact download tokens, and a real Clocker release build
   completed end-to-end through the generic worker.
 
+[0.7.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.7.0
 [0.6.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.6.0
 [0.5.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.5.0
 [0.4.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.4.0

@@ -1,0 +1,27 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    restart: unless-stopped
+    env_file:
+      - .env
+    # The app binds directly to $PORT (see .env) rather than always
+    # listening on a fixed internal port, so both sides of the mapping
+    # must match whatever PORT is actually set to.
+    ports:
+      - "${PORT:-8080}:${PORT:-8080}"
+    volumes:
+      # Docker-outside-of-Docker: lets this container launch isolated
+      # Android build containers via the host daemon. See docs/deployment.md
+      # for the privilege tradeoff this implies.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/app/data
+      - ./builds:/app/builds
+      - ./uploads:/app/uploads
+      - ./jobs:/app/jobs
+    # Lets the container's user read/write the mounted docker.sock without
+    # running the whole process as root. DOCKER_GID must be set in .env to
+    # the host's docker group id (see .env.example).
+    group_add:
+      - "${DOCKER_GID}"

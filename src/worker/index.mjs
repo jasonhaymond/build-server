@@ -17,10 +17,11 @@ import { execFileSync, spawn } from "node:child_process";
 import yauzl from "yauzl";
 import { validateGitSource } from "../security/gitSource.mjs";
 import { registerArtifact } from "./artifacts.mjs";
+import { resolveBuildContainerIds, resolveHostBuildDir } from "./docker.mjs";
 
 const serverDir = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const buildsDir = resolve(serverDir, "builds");
-const dockerImage = process.env.ANDROID_BUILD_IMAGE ?? "android-build-server:latest";
+const dockerImage = process.env.ANDROID_BUILD_IMAGE ?? "build-server-android:latest";
 
 const jobPath = process.argv[2];
 
@@ -402,8 +403,7 @@ if (!existsSync(join(projectRoot, "package.json"))) {
  * ------------------------------------------------------------
  */
 
-const uid = process.getuid?.() ?? 1000;
-const gid = process.getgid?.() ?? 1000;
+const { uid, gid } = resolveBuildContainerIds();
 
 const gradleTask =
   job.build.artifact === "aab"
@@ -579,7 +579,7 @@ const dockerArgs = [
   ...environmentArgs,
 
   "-v",
-  `${jobDir}:/build/job`,
+  `${resolveHostBuildDir(serverDir, job.id)}:/build/job`,
 
   dockerImage,
 
