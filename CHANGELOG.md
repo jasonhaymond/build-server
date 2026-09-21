@@ -5,6 +5,40 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.8.0] - 2026-09-21
+
+### Added
+
+- Automated test suite (`vitest` + `supertest`, `npm test`), hitting a
+  real per-test-file SQLite database and real Docker containers rather
+  than mocking either — 38 tests across 7 files: authentication, scope
+  enforcement, build submission validation, multi-tenant isolation, the
+  full artifact lifecycle (register/list/download/revoke), restart
+  recovery (reattach/interrupted/queued-with-secrets round-trip), ZIP
+  symlink rejection, and Git source SSRF validation.
+- `DB_PATH` env var override (`src/db/database.mjs`) so tests run against
+  an isolated, disposable database instead of the real
+  `data/build-server.db`.
+- `src/api/server.mjs` now exports `app` and only calls
+  `reconstructQueueOnStartup()`/`app.listen()` when run directly, so tests
+  can exercise the real Express app via `supertest` without starting a
+  real listener or touching the queue.
+- `src/worker/zip.mjs`: `extractZipSafely` extracted out of the
+  monolithic worker script so it's unit-testable directly, matching
+  PROJECT-SCOPE.md's suggested `src/worker/` decomposition.
+- GitHub Actions CI (`.github/workflows/ci.yml`): `npm ci && npm test` on
+  every push/PR. `ubuntu-latest` ships Docker preinstalled, so the
+  container-based recovery tests run there with no extra setup.
+
+### Changed
+
+- Clarified (in `src/security/scopes.mjs` and `README.md`) a multi-tenant
+  behavior the isolation test surfaced while being written: an unscoped
+  ("legacy full access") key can see any build, matching the behavior it
+  had before multi-tenancy existed — isolation only applies between
+  explicitly-scoped keys. Behavior was already correct; it just wasn't
+  written down anywhere until a test forced the question.
+
 ## [0.7.0] - 2026-09-21
 
 ### Added
@@ -226,6 +260,7 @@ through the live HTTP API (submit → building → failed, with the persisted
   unguessable artifact download tokens, and a real Clocker release build
   completed end-to-end through the generic worker.
 
+[0.8.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.8.0
 [0.7.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.7.0
 [0.6.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.6.0
 [0.5.0]: https://github.com/jasonhaymond/build-server/releases/tag/v0.5.0

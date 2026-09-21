@@ -10,11 +10,13 @@ const serverDir = resolve(
   "../..",
 );
 
-const dataDir = resolve(serverDir, "data");
+// DB_PATH lets tests point at an isolated, disposable database file
+// instead of this deployment's real data/build-server.db.
+const dbPath = process.env.DB_PATH
+  ? resolve(process.env.DB_PATH)
+  : resolve(serverDir, "data", "build-server.db");
 
-mkdirSync(dataDir, { recursive: true });
-
-const dbPath = resolve(dataDir, "build-server.db");
+mkdirSync(dirname(dbPath), { recursive: true });
 
 const db = new Database(dbPath);
 

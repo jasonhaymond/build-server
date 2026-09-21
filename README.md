@@ -9,7 +9,7 @@ It accepts Android/Expo/React Native source and build configuration,
 builds it in an isolated Docker container, stores the resulting APK/AAB,
 and returns a permanent public download URL.
 
-**Current version:** 0.7.0 — see [CHANGELOG.md](CHANGELOG.md) for release history.
+**Current version:** 0.8.0 — see [CHANGELOG.md](CHANGELOG.md) for release history.
 
 Full architecture, API reference, security model, and the project roadmap
 live in [PROJECT-SCOPE.md](PROJECT-SCOPE.md) — read that first for anything
@@ -86,10 +86,12 @@ node scripts/create-api-key.mjs "ci-bot" --scopes build:create,build:read,build:
 ```
 
 Known scopes: `build:create`, `build:read`, `build:read:any` (cross-tenant
-admin access), `build:logs`, `build:cancel`, `artifact:download`,
-`artifact:manage`, `api-key:manage`, `metrics:read`. Builds are isolated
-per API key — a key can only see/cancel/download its own builds unless it
-holds `build:read:any`.
+ownership bypass — combine with `build:read`/`build:logs`/
+`artifact:download`/`build:cancel` for the specific admin action needed),
+`build:logs`, `build:cancel`, `artifact:download`, `artifact:manage`,
+`api-key:manage`, `metrics:read`. Builds are isolated per API key — a key
+can only see/cancel/download its own builds unless it also holds
+`build:read:any`.
 
 ## Deployment
 
@@ -101,9 +103,20 @@ reverse-proxy config, host firewall rules, and architecture.
 
 ## Status
 
-Actively-hardening (v0.7.0): persistent build queue with restart recovery,
+Actively-hardening (v0.8.0): persistent build queue with restart recovery,
 artifact metadata, API key scopes, build cancellation, retention cleanup,
-multi-tenant isolation, structured logging, and real health checks are all
-in place. See PROJECT-SCOPE.md's "Current Known Limitations" section for
-what's still ahead (automated tests/CI, a web UI) before relying on this
-for anything beyond internal/trusted use.
+multi-tenant isolation, structured logging, real health checks, Docker
+Compose containerization, and an automated test suite/CI are all in
+place. See PROJECT-SCOPE.md's "Current Known Limitations" section for
+what's still ahead (a web UI, setup/deploy scripts, backups) before
+relying on this for anything beyond internal/trusted use.
+
+## Running tests
+
+```bash
+npm test
+```
+
+Tests hit a real, isolated SQLite database per test file and spawn real
+(small, non-Android) Docker containers for the restart-recovery tests —
+nothing is mocked. Requires Docker to be running locally.

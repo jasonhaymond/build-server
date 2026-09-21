@@ -2,6 +2,11 @@
 // admin-style escape hatch multi-tenant isolation needs so at least one
 // kind of key can see across clients (support/ops use), distinct from the
 // plain build:read every regular key gets scoped to its own builds with.
+// It's a single ownership-bypass flag that applies across every build-
+// scoped route (read, logs, artifacts, cancel) — requireBuildAccess checks
+// it regardless of which specific action scope the route also requires.
+// An admin key needs both, e.g. ["build:read", "build:read:any"]: the
+// first says it may read builds at all, the second says whose.
 export const KNOWN_SCOPES = [
   "build:create",
   "build:read",

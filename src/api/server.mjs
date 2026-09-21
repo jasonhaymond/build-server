@@ -12,6 +12,7 @@ import {
   statSync,
 } from "node:fs";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   createApiKey,
   createBuild,
@@ -520,8 +521,17 @@ app.get("/download/:token/:filename", (req, res) => {
   );
 });
 
-reconstructQueueOnStartup();
+export { app };
 
-app.listen(port, () => {
-  logger.info("Build API listening", { port });
-});
+// Only actually start the server (recover the queue, bind the port) when
+// this file is run directly — lets tests import `app` and exercise it
+// with supertest without spawning a real listener or touching the queue.
+const isMainModule = import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isMainModule) {
+  reconstructQueueOnStartup();
+
+  app.listen(port, () => {
+    logger.info("Build API listening", { port });
+  });
+}
