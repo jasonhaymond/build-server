@@ -8,7 +8,10 @@
 > complete endpoint reference, see
 > [docs/api-reference.md](docs/api-reference.md) instead. Its "Current
 > Known Limitations" and status sections describe the state at handoff
-> time and are now stale — most are resolved. For what's actually built
+> time and are now stale — most are resolved. Its single-hostname Caddy
+> example also predates the web UI entirely — for the current reverse
+> proxy setup (both the API route and the web UI route), see
+> [docs/caddy-setup.md](docs/caddy-setup.md). For what's actually built
 > and how to run it today, see [README.md](README.md),
 > [CHANGELOG.md](CHANGELOG.md), and [docs/deployment.md](docs/deployment.md).
 

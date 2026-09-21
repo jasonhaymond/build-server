@@ -116,9 +116,11 @@ for a schema-compatible rollback (redeploy a cached image instead of
 rebuilding); the git tag remains the source of truth either way.
 
 See [docs/deployment.md](docs/deployment.md) for the full first-deploy,
-update, backup, and restore walkthrough, and
-[PROJECT-SCOPE.md](PROJECT-SCOPE.md) for the reverse-proxy config, host
-firewall rules, and architecture.
+update, backup, and restore walkthrough,
+[docs/caddy-setup.md](docs/caddy-setup.md) for the reverse-proxy config
+(both the API route and the web UI route), and
+[PROJECT-SCOPE.md](PROJECT-SCOPE.md) for host firewall rules and
+architecture.
 
 ## Web UI (optional)
 
@@ -139,10 +141,10 @@ Signing in only needs a *valid* key, not any particular scope, so an
 admin-only key isn't locked out. The UI has its own in-app **Help** page
 (reachable signed in or out) covering all of this from a user's
 perspective; see [docs/using-the-web-ui.md](docs/using-the-web-ui.md) for
-the full walkthrough, or
-[docs/deployment.md](docs/deployment.md#web-ui-optional) for the Caddy
-config, `GITHUB_REPO`/`API_IMAGE` setup, and the update-trigger's
-architecture.
+the full walkthrough, [docs/caddy-setup.md](docs/caddy-setup.md) for the
+Caddy config, or
+[docs/deployment.md](docs/deployment.md#web-ui-optional) for
+`GITHUB_REPO`/`API_IMAGE` setup and the update-trigger's architecture.
 
 ## Status
 

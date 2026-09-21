@@ -58,21 +58,13 @@ the build server touching are also running, until that hardening lands.
   `ss -ltnp | grep :8080` or similar before assuming it's free.
 - A separate reverse proxy (Caddy is the default choice for this project)
   terminating TLS and forwarding to this host's `PORT`. This is a manual,
-  system-level step this repo doesn't own — on the separate Caddy host:
-
-  ```caddyfile
-  builds-api.example.com {
-      reverse_proxy 10.x.x.x:8080
-  }
-  ```
-
-  (`10.x.x.x` = this API host's LAN IP, `8080` = whatever `PORT` you
-  chose. The naming convention used throughout these docs: the web UI
-  gets the primary domain, `builds.<domain>` — see Web UI below — and the
-  API gets a distinguishing subdomain, `builds-api.<domain>`.) Caddy
-  terminates HTTPS/TLS; the API itself needs no public TLS configuration.
-  `PUBLIC_BASE_URL` in `.env` must match the public hostname
-  (`https://builds-api.example.com`), not the LAN address.
+  system-level step this repo doesn't own — see
+  **[caddy-setup.md](caddy-setup.md)** for the full setup (both this API
+  route and the web UI route, if you're running that too), including a
+  complete example Caddyfile, DNS/firewall prerequisites, and Caddy-side
+  troubleshooting. In short: `PUBLIC_BASE_URL` in `.env` must match
+  whatever public hostname you point Caddy at, exactly — not this host's
+  LAN address.
 - Host firewall (`ufw` or equivalent) allowing only SSH, 80, and 443
   externally, plus **specifically the reverse-proxy host's IP** on `PORT`
   internally — not the whole LAN. Example:
@@ -150,9 +142,8 @@ docker compose exec api node scripts/create-api-key.mjs "my-first-client"
 ```
 
 Save the printed key now — it's shown once and isn't recoverable; only its
-hash is stored. Then configure the reverse proxy (manual, system-level
-step) to forward `PUBLIC_BASE_URL`'s hostname to this host's `PORT`, per
-the Caddy example in Prerequisites above.
+hash is stored. Then set up the reverse proxy — see
+**[caddy-setup.md](caddy-setup.md)**.
 
 ## Updating
 
@@ -288,20 +279,17 @@ process.
 Because it's a different origin from the API, the API needs to be told to
 allow it via CORS — set `WEB_UI_ORIGIN` in `.env` to the exact origin the
 web UI is served from (e.g. `https://builds.example.com` — the primary
-domain; the API gets the `builds-api.<domain>` subdomain, per the
-Prerequisites section above), then `docker compose up -d` (or restart the
-non-Compose process) to pick it up. Leaving it unset means no
-cross-origin access at all — never set it to a wildcard.
+domain; the API gets the `builds-api.<domain>` subdomain), then
+`docker compose up -d` (or restart the non-Compose process) to pick it
+up. Leaving it unset means no cross-origin access at all — never set it
+to a wildcard.
 
 Adding the Caddy site block is a manual, system-level step (this repo
-doesn't own Caddy's config):
-
-```caddyfile
-builds.example.com {
-    root * /path/to/build-server/web
-    file_server
-}
-```
+doesn't own Caddy's config) — see **[caddy-setup.md](caddy-setup.md)**
+for the full setup: a complete example Caddyfile for both this route and
+the API's, getting `web/` onto the Caddy host, a cache-control detail
+specific to this app's no-build-step static files, and optional
+IP-restriction if the dashboard shouldn't be fully public.
 
 Sign-in is a manually-pasted API key (created with
 `scripts/create-api-key.mjs`), kept only in that browser tab's session
