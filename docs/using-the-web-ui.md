@@ -130,8 +130,10 @@ Your own account settings:
   keys** to see them); once revoked, a key can be **Delete**d
   permanently if you don't want it cluttering the list anymore — this is
   just tidying up, the key already stopped working the moment it was
-  revoked. See [api-reference.md](api-reference.md) for using a key
-  directly (e.g. from a CI pipeline) instead of through this UI.
+  revoked. See [integrating-a-project.md](integrating-a-project.md) for
+  a full walkthrough of wiring a project's CI/deploy pipeline to trigger
+  builds here with a key like this, or
+  [api-reference.md](api-reference.md) for the raw endpoint reference.
 
 ## Admin page
 

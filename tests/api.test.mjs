@@ -86,6 +86,58 @@ describe("build submission validation", () => {
     expect(res.body.id).toMatch(/^bld_/);
   });
 
+  it("rejects source.auth on a non-git source", async () => {
+    const key = createTestApiKey();
+    const res = await request(app)
+      .post("/api/v1/builds")
+      .set("Authorization", `Bearer ${key}`)
+      .send(
+        sampleJob({
+          project: {
+            name: "BadAuthSource",
+            source: { type: "directory", path: "/nonexistent", auth: { type: "token", token: "x" } },
+          },
+        }),
+      );
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects a malformed source.auth on a git source", async () => {
+    const key = createTestApiKey();
+    const res = await request(app)
+      .post("/api/v1/builds")
+      .set("Authorization", `Bearer ${key}`)
+      .send(
+        sampleJob({
+          project: {
+            name: "MalformedAuth",
+            source: { type: "git", url: "https://github.com/example/project.git", auth: { type: "token" } },
+          },
+        }),
+      );
+    expect(res.status).toBe(400);
+  });
+
+  it("queues a git submission with a valid source.auth token", async () => {
+    const key = createTestApiKey();
+    const res = await request(app)
+      .post("/api/v1/builds")
+      .set("Authorization", `Bearer ${key}`)
+      .send(
+        sampleJob({
+          project: {
+            name: "AuthedGitSource",
+            source: {
+              type: "git",
+              url: "https://github.com/example/project.git",
+              auth: { type: "token", token: "ghp_secrettoken" },
+            },
+          },
+        }),
+      );
+    expect(res.status).toBe(202);
+  });
+
   it("returns the project name in the build's status response", async () => {
     const key = createTestApiKey();
     const submit = await request(app)

@@ -11,6 +11,12 @@ and security model.
 Base URL in production: `https://<your-public-hostname>/api/v1` (plus the
 unversioned `/health` and `/download/:token/:filename`).
 
+Wiring a project's own CI/deploy pipeline to trigger builds here (create
+a key, submit, poll, download — the EAS-like flow)? See
+[integrating-a-project.md](integrating-a-project.md) for the
+task-oriented walkthrough instead of piecing it together from this
+reference.
+
 ## Authentication
 
 Two independent methods — both resolve to an acting workspace, but
@@ -273,7 +279,12 @@ Scope: `build:create`.
 {
   "project": {
     "name": "Example",
-    "source": { "type": "git", "url": "https://github.com/example/project.git", "ref": "main" },
+    "source": {
+      "type": "git",
+      "url": "https://github.com/example/project.git",
+      "ref": "main",
+      "auth": { "type": "token", "token": "..." }
+    },
     "projectRoot": "app"
   },
   "build": {
@@ -287,9 +298,22 @@ Scope: `build:create`.
 ```
 
 - `project.source.type`: `"git"`, `"upload"`, or `"directory"` (directory
-  is for trusted/internal use only — see PROJECT-SCOPE.md). Git sources
-  must be HTTPS and resolve to a public address unless
-  `ALLOW_LOCAL_GIT_SOURCES=true`.
+  is for trusted/internal use only — see PROJECT-SCOPE.md; `upload`
+  currently expects a ZIP already present at `source.path` on the server's
+  own disk — there's no HTTP upload endpoint yet, so `upload` isn't
+  actually usable from a remote client today). Git sources must be HTTPS
+  and resolve to a public address unless `ALLOW_LOCAL_GIT_SOURCES=true`.
+- `project.source.auth` (optional, git sources only): `{ "type": "token",
+  "token": "<value>" }` — for a private repository. `"token"` is the only
+  supported type today; the value is sent as the HTTP password (username
+  `x-access-token`, the convention GitHub/GitLab tokens expect) via
+  `GIT_ASKPASS` at clone time, **never embedded in the clone URL** (which
+  is itself logged, unlike the token). Treated exactly like
+  `build.secrets`: encrypted at rest while queued, masked (`***`)
+  everywhere else — logs, persisted job records, API responses — the
+  instant the build starts. A GitHub fine-grained PAT scoped to
+  read-only "Contents" access on just that one repo is the right shape of
+  credential to use here.
 - `project.projectRoot` (optional): relative path to the Android project
   within the submitted source, for monorepos.
 - `build.variant`: `"debug"` or `"release"`. `build.artifact`: `"apk"` or

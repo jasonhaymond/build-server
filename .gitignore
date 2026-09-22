@@ -15,6 +15,11 @@ backups/
 *.pem
 *.key
 
+# Per-deployment web UI config (not a secret, but a server-specific value
+# that must never be a tracked-file hand-edit — see web/config.example.js
+# and scripts/setup.mjs, which generates this automatically).
+web/config.js
+
 # Editor/OS
 .DS_Store
 Thumbs.db

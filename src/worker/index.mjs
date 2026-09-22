@@ -6,6 +6,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -86,6 +87,22 @@ if (job.project?.source?.type === "git" && !job.project.source.url) {
   errors.push("project.source.url is required for git sources");
 }
 
+if (job.project?.source?.auth !== undefined) {
+  const auth = job.project.source.auth;
+
+  if (job.project?.source?.type !== "git") {
+    errors.push("project.source.auth is only supported for git sources");
+  } else if (
+    !auth ||
+    typeof auth !== "object" ||
+    auth.type !== "token" ||
+    typeof auth.token !== "string" ||
+    !auth.token
+  ) {
+    errors.push('project.source.auth must be { "type": "token", "token": "<value>" }');
+  }
+}
+
 if (job.build?.platform !== "android") {
   errors.push("Only Android builds are currently supported");
 }
@@ -129,6 +146,12 @@ mkdirSync(logsDir, { recursive: true });
 
 const persistedJob = {
   ...job,
+  project: job.project?.source?.auth
+    ? {
+        ...job.project,
+        source: { ...job.project.source, auth: { ...job.project.source.auth, token: "***" } },
+      }
+    : job.project,
   build: job.build
     ? {
         ...job.build,
@@ -204,6 +227,12 @@ if (sourceType === "git") {
   log(`Repository: ${job.project.source.url}`);
   log(`Destination: ${sourceInputPath}`);
 
+  const auth = job.project.source.auth;
+
+  if (auth) {
+    log("Authenticating with provided credentials (not shown in logs).");
+  }
+
   const gitArgs = ["clone"];
 
   if (job.project.source.ref) {
@@ -212,13 +241,37 @@ if (sourceType === "git") {
 
   gitArgs.push("--depth", "1", job.project.source.url, sourceInputPath);
 
+  // Credentials are handed to git via GIT_ASKPASS rather than embedded in
+  // the clone URL — the URL (which IS logged, and IS visible in argv/`ps`)
+  // must never contain the token. The askpass script only ever reads it
+  // from an env var and prints it to git directly over a private pipe.
+  const gitEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
+  let askpassPath;
+
+  if (auth) {
+    askpassPath = resolve(workDir, "git-askpass.sh");
+    writeFileSync(
+      askpassPath,
+      "#!/bin/sh\ncase \"$1\" in\n  Username*) printf '%s' \"$BUILD_SERVER_GIT_ASKPASS_USERNAME\" ;;\n  Password*) printf '%s' \"$BUILD_SERVER_GIT_ASKPASS_TOKEN\" ;;\nesac\n",
+      { mode: 0o700 },
+    );
+    gitEnv.GIT_ASKPASS = askpassPath;
+    gitEnv.BUILD_SERVER_GIT_ASKPASS_USERNAME = "x-access-token";
+    gitEnv.BUILD_SERVER_GIT_ASKPASS_TOKEN = auth.token;
+  }
+
   try {
     execFileSync("git", gitArgs, {
-      stdio: "inherit",
+      stdio: ["ignore", "inherit", "inherit"],
+      env: gitEnv,
     });
   } catch (error) {
     logError(`Git clone failed: ${error.message}`);
     process.exit(1);
+  } finally {
+    if (askpassPath && existsSync(askpassPath)) {
+      rmSync(askpassPath, { force: true });
+    }
   }
 
   log("Git clone completed.");

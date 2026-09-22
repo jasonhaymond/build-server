@@ -9,7 +9,7 @@ It accepts Android/Expo/React Native source and build configuration,
 builds it in an isolated Docker container, stores the resulting APK/AAB,
 and returns a permanent public download URL.
 
-**Current version:** 2.1.0 — see [CHANGELOG.md](CHANGELOG.md) for release history.
+**Current version:** 2.2.0 — see [CHANGELOG.md](CHANGELOG.md) for release history.
 
 Architecture rationale, the source/build request schema, and the security
 model live in [PROJECT-SCOPE.md](PROJECT-SCOPE.md) (the original handoff
@@ -83,6 +83,12 @@ curl -X POST http://localhost:8080/api/v1/builds \
     "build": { "platform": "android", "variant": "release", "artifact": "apk" }
   }'
 ```
+
+Wiring another project's CI/deploy pipeline to trigger builds here
+automatically? See
+[docs/integrating-a-project.md](docs/integrating-a-project.md) for a
+full walkthrough (create a scoped key, submit, poll, download — the
+EAS-like flow), including a GitHub Actions example.
 
 See [docs/api-reference.md](docs/api-reference.md) for the full endpoint
 reference (build status, logs, artifacts, permanent download URLs,

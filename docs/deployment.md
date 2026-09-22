@@ -350,6 +350,20 @@ API gets the `builds-api.<domain>` subdomain), then `docker compose up
 -d` (or restart the non-Compose process) to pick it up. Leaving it unset
 means no cross-origin access at all — never set it to a wildcard.
 
+The web UI also needs to know the reverse: where **its own** API calls
+should go. `web/config.js` holds that (`API_BASE_URL`) — it's
+**gitignored, not a tracked file**, written for you by `scripts/setup.mjs`
+(reusing the `PUBLIC_BASE_URL` you already gave it, since that's exactly
+the same value) whenever you answer yes to deploying the web UI. This
+matters operationally, not just as tidiness: a tracked file that's
+hand-edited per deployment is exactly what makes the next `git pull`/
+`scripts/update.sh` stop on a conflict — a real problem this project hit
+in practice before `config.js` was made gitignored. If you're setting it
+up by hand instead of via the script: `cp web/config.example.js
+web/config.js`, then edit `API_BASE_URL` to match `PUBLIC_BASE_URL`
+exactly. Since it's bind-mounted like the rest of `web/`, a change takes
+effect on the next page load — no rebuild, no restart.
+
 **This isn't just a CORS setting — real HTTPS on both hostnames is a
 hard requirement, not a recommendation, for sign-in to work at all**
 across these two origins. The session cookie (real HTTP auth, separate
@@ -517,7 +531,11 @@ debugging). Common cause: uncommitted changes on the host blocking
 `scripts/update.sh`'s own guard — check `git status` there — including an
 untracked stray file (e.g. a manually-made `.env.bak`) sitting in the
 checkout, since `git status --porcelain` treats untracked files the same
-as modified ones.
+as modified ones. If it's specifically `web/config.js` showing modified,
+you're on a deployment from before it became gitignored — `git rm
+--cached web/config.js` once (keeps the file, just stops tracking it;
+it's already in `.gitignore` going forward) and the update will stop
+tripping on it for good.
 
 **`node scripts/backup.mjs` fails with `Cannot find package
 'better-sqlite3'`** — it was run bare on the host instead of inside the

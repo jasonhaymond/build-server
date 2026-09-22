@@ -790,6 +790,29 @@ app.post("/api/v1/builds", requireScope("build:create"), (req, res) => {
     });
   }
 
+  const sourceAuth = job.project?.source?.auth;
+
+  if (sourceAuth !== undefined) {
+    if (job.project?.source?.type !== "git") {
+      return res.status(400).json({
+        error: "project.source.auth is only supported for git sources.",
+      });
+    }
+
+    if (
+      !sourceAuth ||
+      typeof sourceAuth !== "object" ||
+      Array.isArray(sourceAuth) ||
+      sourceAuth.type !== "token" ||
+      typeof sourceAuth.token !== "string" ||
+      sourceAuth.token.length === 0
+    ) {
+      return res.status(400).json({
+        error: 'project.source.auth must be { "type": "token", "token": "<value>" }.',
+      });
+    }
+  }
+
   const id = createBuildId();
   const submittedAt = new Date().toISOString();
 
