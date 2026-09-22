@@ -303,6 +303,14 @@ Scope: `build:create`.
   own disk — there's no HTTP upload endpoint yet, so `upload` isn't
   actually usable from a remote client today). Git sources must be HTTPS
   and resolve to a public address unless `ALLOW_LOCAL_GIT_SOURCES=true`.
+- `project.source.ref` (optional, git sources only): a branch name, a tag
+  name, or a full commit SHA — all three work identically (fetched and
+  checked out directly, not resolved via `git clone --branch`, which
+  can't take an arbitrary SHA). Pinning to a commit SHA (e.g. a CI
+  pipeline's own `${{ github.sha }}`) is the recommended choice for a
+  reproducible deploy trigger — see
+  [integrating-a-project.md](integrating-a-project.md). Omitted entirely,
+  the repository's default branch is used.
 - `project.source.auth` (optional, git sources only): `{ "type": "token",
   "token": "<value>" }` — for a private repository. `"token"` is the only
   supported type today; the value is sent as the HTTP password (username

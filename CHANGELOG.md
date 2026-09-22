@@ -5,6 +5,24 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.3.1] - 2026-09-22
+
+### Fixed
+
+- Git sources pinned to a commit SHA (`project.source.ref` set to a raw
+  SHA rather than a branch/tag name) always failed with `Remote branch
+  <sha> not found in upstream origin` — found immediately, from a real
+  first build submitted by an actual client project using exactly the
+  pattern [docs/integrating-a-project.md](docs/integrating-a-project.md)
+  itself recommends (`"ref": "${{ github.sha }}"`). `git clone --branch`
+  only ever accepted a branch or tag name, never an arbitrary commit SHA.
+  Git cloning now always goes through `init`+`fetch`+`checkout` instead,
+  which works identically for a branch, a tag, or a raw SHA — confirmed
+  directly against a real local repository, both that the fix works and
+  that the old `--branch` approach genuinely failed the same way the real
+  build did. Extracted into a new, independently tested
+  `src/worker/gitClone.mjs` (7 new tests) rather than fixed inline.
+
 ## [2.3.0] - 2026-09-22
 
 ### Added

@@ -16,6 +16,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { validateGitSource } from "../security/gitSource.mjs";
 import { registerArtifact } from "./artifacts.mjs";
 import { resolveBuildContainerIds, resolveHostBuildDir } from "./docker.mjs";
+import { cloneGitSource } from "./gitClone.mjs";
 import { extractZipSafely } from "./zip.mjs";
 
 const serverDir = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -233,45 +234,17 @@ if (sourceType === "git") {
     log("Authenticating with provided credentials (not shown in logs).");
   }
 
-  const gitArgs = ["clone"];
-
-  if (job.project.source.ref) {
-    gitArgs.push("--branch", job.project.source.ref);
-  }
-
-  gitArgs.push("--depth", "1", job.project.source.url, sourceInputPath);
-
-  // Credentials are handed to git via GIT_ASKPASS rather than embedded in
-  // the clone URL — the URL (which IS logged, and IS visible in argv/`ps`)
-  // must never contain the token. The askpass script only ever reads it
-  // from an env var and prints it to git directly over a private pipe.
-  const gitEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
-  let askpassPath;
-
-  if (auth) {
-    askpassPath = resolve(workDir, "git-askpass.sh");
-    writeFileSync(
-      askpassPath,
-      "#!/bin/sh\ncase \"$1\" in\n  Username*) printf '%s' \"$BUILD_SERVER_GIT_ASKPASS_USERNAME\" ;;\n  Password*) printf '%s' \"$BUILD_SERVER_GIT_ASKPASS_TOKEN\" ;;\nesac\n",
-      { mode: 0o700 },
-    );
-    gitEnv.GIT_ASKPASS = askpassPath;
-    gitEnv.BUILD_SERVER_GIT_ASKPASS_USERNAME = "x-access-token";
-    gitEnv.BUILD_SERVER_GIT_ASKPASS_TOKEN = auth.token;
-  }
-
   try {
-    execFileSync("git", gitArgs, {
-      stdio: ["ignore", "inherit", "inherit"],
-      env: gitEnv,
+    cloneGitSource({
+      url: job.project.source.url,
+      ref: job.project.source.ref,
+      auth,
+      destination: sourceInputPath,
+      askpassDir: workDir,
     });
   } catch (error) {
     logError(`Git clone failed: ${error.message}`);
     process.exit(1);
-  } finally {
-    if (askpassPath && existsSync(askpassPath)) {
-      rmSync(askpassPath, { force: true });
-    }
   }
 
   log("Git clone completed.");
