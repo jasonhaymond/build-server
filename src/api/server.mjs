@@ -19,14 +19,19 @@ import {
   consumeRecoveryCode,
   createApiKey,
   createBuild,
+  createInvite,
+  createNotification,
   createRecoveryCodes,
   createSession,
   createSignupRequest,
   createUser,
+  decideSignupRequest,
+  deleteInvite,
   deleteRecoveryCodesForUser,
   deleteSessionByTokenHash,
   disableApiKey,
   disableArtifactDownloadTokenForArtifact,
+  disableUserTotp,
   enableUserTotp,
   getActiveInviteByTokenHash,
   getApiKeyByHash,
@@ -37,13 +42,21 @@ import {
   getBuild,
   getBuildMetrics,
   getSessionWithUser,
+  getSignupRequestById,
   getTotalBuildCount,
   getUserById,
   getUserByUsername,
   listApiKeysForUser,
   listBuilds,
+  listInvites,
+  listSignupRequests,
+  listUnreadNotificationsForUser,
+  listUsers,
   markInviteUsed,
+  markNotificationRead,
   recordUserLogin,
+  setUserEnabled,
+  setUserRole,
   updateUserPassword,
   upsertAppMeta,
 } from "../db/database.mjs";
@@ -141,6 +154,20 @@ function issueSession(user) {
     cookie: buildSessionCookie(rawToken, { secure: cookieSecure, maxAgeSeconds: sessionTtlHours * 3600 }),
     csrfToken,
   };
+}
+
+// Best-effort — an admin still gets the raw token back either way
+// (nothing here fails), but a shareable link needs a known web UI
+// origin to build from.
+function buildInviteLink(token, purpose) {
+  const origin = allowedOrigins[0];
+
+  if (!origin) {
+    return null;
+  }
+
+  const path = purpose === "password_reset" ? "password-reset" : "signup";
+  return `${origin}/#/${path}?token=${token}`;
 }
 
 // The web UI (web/) is typically served from its own Caddy site, a
@@ -369,6 +396,20 @@ function sanitizeBuildForResponse(build) {
     artifactType: build.artifactType ?? null,
     failureReason: build.failureReason ?? null,
     cancellationState: build.cancellationState ?? null,
+  };
+}
+
+// getUserById's row includes passwordHash/totpSecret for internal use
+// (verifying login, etc.) — never send those back over the wire.
+function sanitizeUserForResponse(user) {
+  return {
+    id: user.id,
+    username: user.username,
+    role: user.role,
+    enabled: Boolean(user.enabled),
+    totpEnabled: Boolean(user.totpEnabled),
+    createdAt: user.createdAt,
+    lastLoginAt: user.lastLoginAt ?? null,
   };
 }
 
@@ -1055,6 +1096,219 @@ app.get("/api/v1/system/logs", requireAdmin, (req, res) => {
   const level = ["info", "warn", "error"].includes(req.query.level) ? req.query.level : undefined;
 
   return res.json({ entries: tailApiLog({ lines, level }) });
+});
+
+// --- Admin: user/invite/signup-request management ---
+// Manages accounts, never user *data* — no build/log/artifact/key
+// visibility is granted anywhere here, per absolute isolation.
+
+app.get("/api/v1/admin/users", requireAdmin, (req, res) => {
+  return res.json({
+    users: listUsers().map((user) => ({ ...user, enabled: Boolean(user.enabled), totpEnabled: Boolean(user.totpEnabled) })),
+  });
+});
+
+app.patch("/api/v1/admin/users/:id", requireAdmin, (req, res) => {
+  const userId = Number(req.params.id);
+  const target = getUserById(userId);
+
+  if (!target) {
+    return res.status(404).json({ error: "User not found." });
+  }
+
+  const { enabled, role } = req.body ?? {};
+
+  if (enabled !== undefined) {
+    if (typeof enabled !== "boolean") {
+      return res.status(400).json({ error: "enabled must be a boolean." });
+    }
+
+    if (userId === req.user.id && enabled === false) {
+      return res.status(400).json({ error: "You cannot disable your own account." });
+    }
+
+    setUserEnabled(userId, enabled);
+  }
+
+  if (role !== undefined) {
+    if (!["admin", "user"].includes(role)) {
+      return res.status(400).json({ error: "role must be 'admin' or 'user'." });
+    }
+
+    if (userId === req.user.id && role !== "admin") {
+      return res.status(400).json({ error: "You cannot demote your own account." });
+    }
+
+    setUserRole(userId, role);
+  }
+
+  return res.json(sanitizeUserForResponse(getUserById(userId)));
+});
+
+// Generates a password_reset invite and hands back the link for the
+// admin to copy/send out-of-band — this repo sends no email itself.
+app.post("/api/v1/admin/users/:id/reset-password", requireAdmin, (req, res) => {
+  const userId = Number(req.params.id);
+
+  if (!getUserById(userId)) {
+    return res.status(404).json({ error: "User not found." });
+  }
+
+  const token = randomBytes(32).toString("hex");
+  const now = new Date();
+
+  createInvite({
+    tokenHash: createHash("sha256").update(token).digest("hex"),
+    purpose: "password_reset",
+    targetUserId: userId,
+    createdBy: req.user.id,
+    createdAt: now.toISOString(),
+    expiresAt: new Date(now.getTime() + 24 * 3600 * 1000).toISOString(),
+  });
+
+  return res.status(201).json({ link: buildInviteLink(token, "password_reset") });
+});
+
+// For a lost authenticator — clears enrollment so the account falls back
+// into the same forced-enrollment flow a brand-new signup goes through,
+// the next time its password is verified successfully.
+app.post("/api/v1/admin/users/:id/reset-2fa", requireAdmin, (req, res) => {
+  const userId = Number(req.params.id);
+
+  if (!getUserById(userId)) {
+    return res.status(404).json({ error: "User not found." });
+  }
+
+  disableUserTotp(userId);
+
+  return res.json({ id: userId, totpEnabled: false });
+});
+
+app.post("/api/v1/admin/invites", requireAdmin, (req, res) => {
+  const { role, suggestedUsername, expiresInHours } = req.body ?? {};
+
+  if (!["admin", "user"].includes(role)) {
+    return res.status(400).json({ error: "role must be 'admin' or 'user'." });
+  }
+
+  const token = randomBytes(32).toString("hex");
+  const now = new Date();
+  const hours = Number(expiresInHours) > 0 ? Number(expiresInHours) : 72;
+
+  const result = createInvite({
+    tokenHash: createHash("sha256").update(token).digest("hex"),
+    purpose: "signup",
+    role,
+    suggestedUsername: typeof suggestedUsername === "string" && suggestedUsername.trim() ? suggestedUsername.trim() : null,
+    createdBy: req.user.id,
+    createdAt: now.toISOString(),
+    expiresAt: new Date(now.getTime() + hours * 3600 * 1000).toISOString(),
+  });
+
+  return res.status(201).json({ id: result.lastInsertRowid, link: buildInviteLink(token, "signup") });
+});
+
+app.get("/api/v1/admin/invites", requireAdmin, (req, res) => {
+  return res.json({ invites: listInvites() });
+});
+
+app.delete("/api/v1/admin/invites/:id", requireAdmin, (req, res) => {
+  deleteInvite(Number(req.params.id));
+  return res.status(204).send();
+});
+
+app.get("/api/v1/admin/signup-requests", requireAdmin, (req, res) => {
+  return res.json({ signupRequests: listSignupRequests() });
+});
+
+// Approving creates a signup invite pre-filled with the requester's
+// chosen username and links back to this request for traceability — it
+// does not create the account directly, the requester still completes
+// the same invite flow anyone else would.
+app.post("/api/v1/admin/signup-requests/:id/approve", requireAdmin, (req, res) => {
+  const id = Number(req.params.id);
+  const signupRequest = getSignupRequestById(id);
+
+  if (!signupRequest || signupRequest.status !== "pending") {
+    return res.status(404).json({ error: "Signup request not found or already decided." });
+  }
+
+  const { role } = req.body ?? {};
+
+  if (!["admin", "user"].includes(role)) {
+    return res.status(400).json({ error: "role must be 'admin' or 'user'." });
+  }
+
+  const token = randomBytes(32).toString("hex");
+  const now = new Date();
+
+  createInvite({
+    tokenHash: createHash("sha256").update(token).digest("hex"),
+    purpose: "signup",
+    role,
+    suggestedUsername: signupRequest.requestedUsername,
+    signupRequestId: signupRequest.id,
+    createdBy: req.user.id,
+    createdAt: now.toISOString(),
+    expiresAt: new Date(now.getTime() + 72 * 3600 * 1000).toISOString(),
+  });
+
+  decideSignupRequest(id, { status: "approved", decidedBy: req.user.id });
+
+  return res.status(201).json({ link: buildInviteLink(token, "signup") });
+});
+
+app.post("/api/v1/admin/signup-requests/:id/reject", requireAdmin, (req, res) => {
+  const id = Number(req.params.id);
+  const signupRequest = getSignupRequestById(id);
+
+  if (!signupRequest || signupRequest.status !== "pending") {
+    return res.status(404).json({ error: "Signup request not found or already decided." });
+  }
+
+  decideSignupRequest(id, { status: "rejected", decidedBy: req.user.id });
+
+  return res.json({ id, status: "rejected" });
+});
+
+// --- Broadcast notifications ---
+// The one sanctioned cross-user action in the whole isolation model: an
+// admin sending everyone a heads-up (e.g. "restarting the server for an
+// update"). Sending is admin-only; reading/dismissing is any signed-in
+// account's own inbox.
+
+app.post("/api/v1/admin/notifications", requireAdmin, (req, res) => {
+  const { message } = req.body ?? {};
+
+  if (!message || typeof message !== "string" || !message.trim()) {
+    return res.status(400).json({ error: "message is required." });
+  }
+
+  const result = createNotification({
+    message: message.trim().slice(0, 2000),
+    createdBy: req.user.id,
+    createdAt: new Date().toISOString(),
+  });
+
+  return res.status(201).json({ id: result.lastInsertRowid });
+});
+
+app.get("/api/v1/notifications", (req, res) => {
+  if (!req.user) {
+    return res.json({ notifications: [] });
+  }
+
+  return res.json({ notifications: listUnreadNotificationsForUser(req.user.id) });
+});
+
+app.post("/api/v1/notifications/:id/read", (req, res) => {
+  if (!req.user) {
+    return res.status(403).json({ error: "This action requires an identified account." });
+  }
+
+  markNotificationRead(Number(req.params.id), req.user.id);
+
+  return res.status(204).send();
 });
 
 app.get("/download/:token/:filename", (req, res) => {
