@@ -315,7 +315,13 @@ Scope: `build:create`.
   read-only "Contents" access on just that one repo is the right shape of
   credential to use here.
 - `project.projectRoot` (optional): relative path to the Android project
-  within the submitted source, for monorepos.
+  within the submitted source, for monorepos. If the repo root itself
+  declares `"workspaces"` (npm/yarn workspaces), dependencies are
+  installed once at the repo root instead of at `projectRoot` — needed
+  for a project root that depends on a sibling workspace package (e.g.
+  `"@scope/shared": "*"`), which can't be installed on its own since that
+  package doesn't exist on the registry, only as a symlink workspace
+  install creates.
 - `build.variant`: `"debug"` or `"release"`. `build.artifact`: `"apk"` or
   `"aab"`.
 - `build.env` / `build.secrets`: plain objects, string/number/boolean

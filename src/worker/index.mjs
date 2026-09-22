@@ -378,6 +378,27 @@ if (!existsSync(join(projectRoot, "package.json"))) {
   process.exit(1);
 }
 
+// npm/yarn workspaces monorepo detection: a project at projectRoot that
+// depends on a sibling workspace package (e.g. "@scope/shared": "*") can't
+// be `npm install`ed on its own — that dependency doesn't exist on the
+// registry, only as a symlink npm creates when installing from the repo
+// root. When the repo root itself declares `workspaces` and projectRoot is
+// a real subdirectory of it, install once at the root instead of at
+// projectRoot — Node's own upward module resolution finds the hoisted/
+// symlinked packages from there same as it would from a plain install.
+let rootPackageJson = null;
+try {
+  rootPackageJson = JSON.parse(readFileSync(join(sourceDir, "package.json"), "utf8"));
+} catch {
+  rootPackageJson = null;
+}
+const isWorkspaceMonorepo = Boolean(rootPackageJson?.workspaces) && projectRootRelative !== ".";
+
+if (isWorkspaceMonorepo) {
+  log(`Detected an npm/yarn workspaces monorepo at the repo root — installing there instead of at the project root.`);
+  log("");
+}
+
 /*
  * ------------------------------------------------------------
  * Docker execution
@@ -396,6 +417,7 @@ const gradleVariant =
   job.build.variant.slice(1);
 
 const containerProjectRoot = `/build/job/source/${projectRootRelative === "." ? "" : `${projectRootRelative}/`}`;
+const containerInstallRoot = isWorkspaceMonorepo ? "/build/job/source" : containerProjectRoot;
 
 const artifactRelativePath =
   job.build.artifact === "apk"
@@ -430,11 +452,12 @@ sdkmanager --version
 
 echo
 echo "=== Installing dependencies ==="
-cd "${containerProjectRoot}"
+cd "${containerInstallRoot}"
 npm install
 
 echo
 echo "=== Generating Android project ==="
+cd "${containerProjectRoot}"
 NODE_ENV=production npx expo prebuild --clean --platform android
 
 if [ ! -d android ]; then

@@ -5,6 +5,19 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.3.0] - 2026-09-22
+
+### Added
+
+- `project.projectRoot` now installs dependencies at the repo root
+  instead of at `projectRoot` when the root declares npm/yarn
+  `"workspaces"` — Clocker (the first real client) is exactly this shape,
+  a monorepo where the Android app depends on a sibling workspace
+  package that doesn't exist on the npm registry on its own. Dependencies
+  install once at the repo root (where the workspace symlinks actually
+  get created), then the build continues from `projectRoot` as normal.
+  See [docs/api-reference.md](docs/api-reference.md).
+
 ## [2.2.0] - 2026-09-22
 
 ### Added
