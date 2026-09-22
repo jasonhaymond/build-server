@@ -43,13 +43,16 @@ describe("GET /api/v1/whoami", () => {
     expect(res.body.authMethod).toBe("apiKey");
   });
 
-  it("also works for a signed-in session", async () => {
-    const { cookie } = createTestSession({ role: "user" });
+  it("also works for a signed-in session, and hands back its CSRF token", async () => {
+    const { cookie, csrfToken } = createTestSession({ role: "user" });
     const res = await request(app).get("/api/v1/whoami").set("Cookie", cookie);
 
     expect(res.status).toBe(200);
     expect(res.body.role).toBe("user");
     expect(res.body.authMethod).toBe("session");
+    // Lets the web UI re-establish a usable CSRF token after a page
+    // reload (the cookie survives; in-memory JS state doesn't).
+    expect(res.body.csrfToken).toBe(csrfToken);
   });
 });
 

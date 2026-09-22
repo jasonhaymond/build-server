@@ -1,25 +1,68 @@
-import { api, clearApiKey, getApiKey, getBaseUrl, setApiKey, setBaseUrl } from "./api.js";
+import { api, clearSession, getCurrentUser, setSession } from "./api.js";
+import { renderAdmin } from "./admin.js";
+import { renderPasswordReset, renderProfile, renderRequestAccess, renderSignIn, renderSignup } from "./auth.js";
 
-const root = document.getElementById("app");
+export const root = document.getElementById("app");
 let dashboardTimer = null;
 
-function stopDashboardPolling() {
+export function stopDashboardPolling() {
   if (dashboardTimer) {
     clearInterval(dashboardTimer);
     dashboardTimer = null;
   }
 }
 
-function escapeHtml(value) {
+export function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (c) => (
     { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
   ));
 }
 
-function layout(activeRoute, bodyHtml) {
+async function loadNotificationBanner() {
+  if (!getCurrentUser()) return;
+
+  const el = document.getElementById("notificationBanner");
+  if (!el) return;
+
+  try {
+    const { notifications } = await api.getNotifications();
+
+    if (notifications.length === 0) {
+      el.innerHTML = "";
+      return;
+    }
+
+    el.innerHTML = notifications.map((n) => `
+      <div class="banner">
+        <span>${escapeHtml(n.message)}</span>
+        <button data-dismiss-notification="${n.id}" aria-label="Dismiss">&times;</button>
+      </div>
+    `).join("");
+
+    el.querySelectorAll("[data-dismiss-notification]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        try {
+          await api.markNotificationRead(btn.dataset.dismissNotification);
+        } catch {
+          // best-effort — don't block dismissal on a failed request
+        }
+        loadNotificationBanner();
+      });
+    });
+  } catch {
+    // Best-effort — a failed notification fetch shouldn't disrupt the page.
+  }
+}
+
+// Independent of dashboardTimer (which only runs on some pages) — the
+// banner should stay current on every authenticated page.
+setInterval(loadNotificationBanner, 30000);
+
+export function layout(activeRoute, bodyHtml) {
   const links = [
     ["#/", "Dashboard"],
     ["#/submit", "Submit build"],
+    ["#/profile", "Profile"],
     ["#/admin", "Admin"],
     ["#/help", "Help"],
   ];
@@ -36,69 +79,27 @@ function layout(activeRoute, bodyHtml) {
         <button id="signOut">Sign out</button>
       </div>
     </header>
+    <div id="notificationBanner"></div>
     <main>${bodyHtml}</main>
   `;
 
-  document.getElementById("signOut").addEventListener("click", () => {
+  document.getElementById("signOut").addEventListener("click", async () => {
     stopDashboardPolling();
-    clearApiKey();
-    renderRoute();
-  });
-}
-
-function statusBadge(status) {
-  return `<span class="badge ${escapeHtml(status)}">${escapeHtml(status)}</span>`;
-}
-
-async function renderSignIn() {
-  root.innerHTML = `
-    <main style="max-width: 420px; margin: 80px auto;">
-      <div class="card">
-        <h2>Sign in</h2>
-        <p class="muted">
-          Paste an API key created with <code>scripts/create-api-key.mjs</code>.
-          It's kept only in this tab's session storage — never sent anywhere
-          but this server, and cleared when you sign out or close the tab.
-        </p>
-        <div id="signInError"></div>
-        <div class="field">
-          <label for="baseUrl">API base URL</label>
-          <input id="baseUrl" value="${escapeHtml(getBaseUrl())}" />
-        </div>
-        <div class="field">
-          <label for="apiKey">API key</label>
-          <input id="apiKey" type="password" placeholder="abs_..." />
-        </div>
-        <button class="primary" id="signInBtn">Sign in</button>
-        <p class="muted" style="margin-top: 12px;">
-          <a class="row-link" href="#/help">Need help?</a>
-        </p>
-      </div>
-    </main>
-  `;
-
-  document.getElementById("signInBtn").addEventListener("click", async () => {
-    const baseUrl = document.getElementById("baseUrl").value.trim();
-    const key = document.getElementById("apiKey").value.trim();
-    const errorEl = document.getElementById("signInError");
-    errorEl.innerHTML = "";
-
-    if (!key) {
-      errorEl.innerHTML = `<div class="error">API key is required.</div>`;
-      return;
-    }
-
-    setBaseUrl(baseUrl || window.location.origin);
-    setApiKey(key);
 
     try {
-      await api.whoami();
-      renderRoute();
-    } catch (error) {
-      clearApiKey();
-      errorEl.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
+      await api.logout();
+    } catch {
+      clearSession();
     }
+
+    renderRoute();
   });
+
+  loadNotificationBanner();
+}
+
+export function statusBadge(status) {
+  return `<span class="badge ${escapeHtml(status)}">${escapeHtml(status)}</span>`;
 }
 
 async function renderDashboard() {
@@ -148,7 +149,7 @@ async function renderDashboard() {
     } catch (error) {
       const errorEl = document.getElementById("dashboardError");
       if (errorEl) errorEl.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
-      if (error.message.includes("Unauthorized")) renderRoute();
+      if (error.message.includes("session")) renderRoute();
     }
   }
 
@@ -354,166 +355,31 @@ async function renderBuildDetail(id) {
   dashboardTimer = setInterval(load, 4000);
 }
 
-async function renderAdmin() {
-  stopDashboardPolling();
-
-  layout("#/admin", `
-    <div id="adminError"></div>
-    <div id="adminBody">Loading…</div>
-  `);
-
-  const bodyEl = document.getElementById("adminBody");
-  const errorEl = document.getElementById("adminError");
-
-  async function load() {
-    try {
-      const [status, metrics, logs] = await Promise.all([
-        api.getSystemStatus(),
-        api.getMetrics(),
-        api.getSystemLogs({ lines: 100 }),
-      ]);
-
-      errorEl.innerHTML = "";
-
-      const updateBanner = status.checked && status.updateAvailable
-        ? `<div class="error" style="color: var(--warn); border-color: var(--warn); background: rgba(210,153,34,0.1);">
-             A newer version is available: v${escapeHtml(status.latestVersion)} (running v${escapeHtml(status.version)})
-           </div>`
-        : "";
-
-      const statusRows = Object.entries(metrics.buildsByStatus || {})
-        .map(([s, count]) => `<tr><td>${statusBadge(s)}</td><td>${count}</td></tr>`)
-        .join("") || `<tr><td colspan="2" class="muted">No builds yet.</td></tr>`;
-
-      const logLines = logs.entries
-        .map((e) => `${e.ts ?? ""} [${(e.level ?? "info").toUpperCase()}] ${e.source ?? ""}: ${e.msg ?? ""}`)
-        .join("\n");
-
-      bodyEl.innerHTML = `
-        <h2>Admin</h2>
-        ${updateBanner}
-        <div class="card">
-          <h3>Version</h3>
-          <p>Running: <strong>v${escapeHtml(status.version)}</strong>
-            ${status.checked ? `· Latest: v${escapeHtml(status.latestVersion)}` : `· <span class="muted">(couldn't check for updates — GITHUB_REPO not set or unreachable)</span>`}
-          </p>
-          <p class="muted">Last boot: ${status.lastBootAt ? escapeHtml(new Date(status.lastBootAt).toLocaleString()) : "unknown"}</p>
-          <div class="row">
-            <input id="targetRef" placeholder="Target tag (blank = latest)" style="max-width: 220px;" />
-            <button class="primary" id="updateBtn">Update now</button>
-          </div>
-          <p class="muted">
-            Runs the real <code>scripts/update.sh</code> (uncommitted-changes guard,
-            pre-update snapshot, health-check poll) in a fresh sibling container.
-            Only works for Docker Compose deployments with
-            <code>HOST_PROJECT_DIR</code>/<code>API_IMAGE</code> set.
-          </p>
-        </div>
-
-        <div class="card">
-          <h3>Backups</h3>
-          <button id="backupBtn">Back up now</button>
-          <p class="muted">
-            Snapshots the database (consistent, safe against a live database)
-            and <code>.env</code> to <code>backups/</code> on the server —
-            the same thing <code>scripts/update.sh</code> already does before
-            every update. This only protects you if the backup also leaves
-            the host; see docs/deployment.md.
-          </p>
-          <div id="backupResult"></div>
-        </div>
-
-        <div class="card">
-          <h3>Queue</h3>
-          <p>Active build: ${status.activeBuild ? statusBadge("building") : `<span class="muted">none</span>`}
-             · Queued: ${status.queuedBuilds}</p>
-          <table>
-            <thead><tr><th>Status</th><th>Count</th></tr></thead>
-            <tbody>${statusRows}</tbody>
-          </table>
-          <p class="muted">Average build duration: ${metrics.averageDurationMs ? `${(metrics.averageDurationMs / 1000).toFixed(1)}s` : "—"} (${metrics.durationSampleCount} sample(s))</p>
-        </div>
-
-        <div class="card">
-          <div class="spaced">
-            <h3>API log (last 100 lines)</h3>
-            <button id="refreshLogsBtn">Refresh</button>
-          </div>
-          <pre class="logs">${escapeHtml(logLines || "(no log entries yet)")}</pre>
-        </div>
-      `;
-
-      document.getElementById("refreshLogsBtn").addEventListener("click", load);
-
-      document.getElementById("backupBtn").addEventListener("click", async (event) => {
-        const btn = event.currentTarget;
-        const resultEl = document.getElementById("backupResult");
-
-        btn.disabled = true;
-        resultEl.innerHTML = "";
-
-        try {
-          const result = await api.triggerBackup();
-          resultEl.innerHTML = `<p class="muted">Backup written: ${escapeHtml(result.archivePath)}</p>`;
-        } catch (error) {
-          resultEl.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
-        } finally {
-          btn.disabled = false;
-        }
-      });
-
-      document.getElementById("updateBtn").addEventListener("click", async () => {
-        const targetRef = document.getElementById("targetRef").value.trim();
-        const confirmed = window.confirm(
-          targetRef
-            ? `Trigger a real update to ${targetRef}? This redeploys the live service.`
-            : "Trigger a real update to the latest commit? This redeploys the live service.",
-        );
-
-        if (!confirmed) return;
-
-        try {
-          const result = await api.triggerUpdate(targetRef || undefined);
-          errorEl.innerHTML = `<div class="card">Update triggered (${escapeHtml(result.targetRef)}). The service will restart shortly — this page may briefly lose connection.</div>`;
-        } catch (error) {
-          errorEl.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
-        }
-      });
-    } catch (error) {
-      bodyEl.innerHTML = "";
-      errorEl.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
-    }
-  }
-
-  await load();
-}
-
 function renderHelpContent() {
   return `
     <h2>Help</h2>
     <div class="card">
       <h3>Signing in</h3>
-      <p>You need an <strong>API base URL</strong> (where the build-server
-        API itself lives, not this web UI's own address) and an
-        <strong>API key</strong> (starts with <code>abs_</code>) from
-        whoever administers this deployment. The key is shown to them
-        once when created and can't be recovered later — if you don't
-        have one, ask for a new one rather than trying to find an old one.</p>
-      <p class="muted">The key is stored only in this browser tab's
-        session storage — never sent anywhere but this API, and cleared
-        on sign out or when you close the tab.</p>
+      <p>Sign in with your username and password, then a 6-digit code
+        from an authenticator app (or one of your recovery codes).
+        Two-factor authentication is required for every account here —
+        there's no way to turn it off.</p>
+      <p class="muted">Don't have an account? Use
+        <a class="row-link" href="#/request-access">Request access</a> —
+        an admin reviews it and, if approved, sends you an invite link.</p>
     </div>
     <div class="card">
       <h3>What you can do</h3>
-      <p>Depends entirely on what your key was scoped for. A "missing
-        required scope" error means that action isn't part of what your
-        key can do — not a bug. Ask your admin if you need more access.</p>
+      <p>Your own account and any API keys you create for yourself only
+        ever see your own builds — never anyone else's, and admins can't
+        see them either. A "missing required scope" error on an API key
+        means that action isn't part of what that specific key can do,
+        not a bug.</p>
     </div>
     <div class="card">
       <h3>Dashboard</h3>
-      <p>Lists builds — yours, or every client's if your key allows it.
-        Click a project name for details. Refreshes automatically every
-        5 seconds.</p>
+      <p>Lists your builds. Click a project name for details. Refreshes
+        automatically every 5 seconds.</p>
       <table>
         <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
         <tbody>
@@ -544,12 +410,20 @@ function renderHelpContent() {
         Cancel is only available while a build is queued or building.</p>
     </div>
     <div class="card">
+      <h3>Profile</h3>
+      <p>Change your password, regenerate your two-factor recovery codes
+        (invalidates the old ones), and create or revoke your own API
+        keys for CI/scripted access — always scoped to your own builds,
+        never able to manage other accounts or the server itself.</p>
+    </div>
+    <div class="card">
       <h3>Admin page</h3>
-      <p>Requires admin-level access. Shows the running version and lets
-        you trigger a real update or backup, see the build queue, and
-        read the service's own log. Update now redeploys the live
-        service and asks for confirmation first; Back up now is
-        non-destructive.</p>
+      <p>Requires an admin account, signed in — never an API key, even a
+        full-access one. Manage accounts (never their build data),
+        invites, signup requests, and send a broadcast notification to
+        everyone (the one deliberate exception to every account's
+        isolation from every other). Also: the running version, a real
+        update/backup trigger, and the service's own log.</p>
     </div>
     <p class="muted">
       Full walkthrough:
@@ -563,20 +437,44 @@ function renderHelpContent() {
 function renderHelp() {
   stopDashboardPolling();
 
-  if (getApiKey()) {
+  if (getCurrentUser()) {
     layout("#/help", renderHelpContent());
     return;
   }
 
   root.innerHTML = `
     <main style="max-width: 640px; margin: 40px auto;">
-      <p><a class="row-link" href="#/">&larr; Back to sign in</a></p>
+      <p><a class="row-link" href="#/signin">&larr; Back to sign in</a></p>
       ${renderHelpContent()}
     </main>
   `;
 }
 
-function renderRoute() {
+let sessionRestoreAttempted = false;
+
+// A page reload keeps the session cookie (it's not something JS ever
+// touches) but loses every in-memory JS variable, including the CSRF
+// token — whoami() re-establishes both from the still-valid cookie
+// alone. Only ever attempted once per page load; a failure just means
+// "not signed in," not something to keep retrying.
+async function ensureSessionRestored() {
+  if (getCurrentUser() || sessionRestoreAttempted) return;
+  sessionRestoreAttempted = true;
+
+  try {
+    const who = await api.whoami();
+
+    if (who.authMethod === "session") {
+      setSession({ id: who.id, username: who.username, role: who.role }, who.csrfToken);
+    }
+  } catch {
+    // Not signed in — the normal, expected case on a fresh visit.
+  }
+}
+
+export async function renderRoute() {
+  await ensureSessionRestored();
+
   const hash = window.location.hash || "#/";
 
   if (hash === "#/help") {
@@ -584,7 +482,25 @@ function renderRoute() {
     return;
   }
 
-  if (!getApiKey()) {
+  if (hash.startsWith("#/signup")) {
+    stopDashboardPolling();
+    renderSignup(hash);
+    return;
+  }
+
+  if (hash.startsWith("#/password-reset")) {
+    stopDashboardPolling();
+    renderPasswordReset(hash);
+    return;
+  }
+
+  if (hash === "#/request-access") {
+    stopDashboardPolling();
+    renderRequestAccess();
+    return;
+  }
+
+  if (!getCurrentUser()) {
     stopDashboardPolling();
     renderSignIn();
     return;
@@ -596,6 +512,8 @@ function renderRoute() {
     renderSubmit();
   } else if (hash === "#/admin") {
     renderAdmin();
+  } else if (hash === "#/profile") {
+    renderProfile();
   } else if (buildMatch) {
     renderBuildDetail(decodeURIComponent(buildMatch[1]));
   } else {

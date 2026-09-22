@@ -34,10 +34,20 @@ describe("buildSessionCookie / buildClearedSessionCookie", () => {
     expect(buildSessionCookie("t", { secure: false, maxAgeSeconds: 60 })).not.toContain("Secure");
   });
 
-  it("always sets HttpOnly and SameSite=None", () => {
+  it("always sets HttpOnly, and SameSite=None when secure", () => {
     const cookie = buildSessionCookie("t", { secure: true, maxAgeSeconds: 60 });
     expect(cookie).toContain("HttpOnly");
     expect(cookie).toContain("SameSite=None");
+  });
+
+  // Browsers require Secure on any SameSite=None cookie and silently
+  // drop it otherwise — confirmed directly against a real Chromium
+  // session, which never stored the cookie at all when this sent
+  // SameSite=None without Secure. SameSite has to track `secure`.
+  it("falls back to SameSite=Lax when not secure, instead of a cookie browsers would just drop", () => {
+    const cookie = buildSessionCookie("t", { secure: false, maxAgeSeconds: 60 });
+    expect(cookie).toContain("SameSite=Lax");
+    expect(cookie).not.toContain("SameSite=None");
   });
 
   it("clears the cookie with Max-Age=0", () => {

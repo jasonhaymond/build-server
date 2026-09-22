@@ -22,17 +22,26 @@ export function parseCookieHeader(header) {
   );
 }
 
-// SameSite=None (not Lax/Strict) because the web UI and API are meant to
-// run on different subdomains (docs/caddy-setup.md) — a cross-site
-// context by the cookie spec's definition even though both are under the
-// same operator's control. `secure` is a parameter (not hardcoded true)
-// so local non-HTTPS dev can turn it off via COOKIE_SECURE=false.
+// SameSite=None because production runs the web UI and API on different
+// subdomains (docs/caddy-setup.md) — a cross-site context by the cookie
+// spec's definition even though both are under the same operator's
+// control. Browsers *require* Secure on any SameSite=None cookie and
+// silently drop it otherwise (confirmed directly: a real Chromium
+// session never stored the cookie at all when this sent SameSite=None
+// without Secure) — so SameSite has to track `secure`, not be hardcoded.
+// COOKIE_SECURE=false (local non-HTTPS dev) therefore also means
+// same-origin-only cookies (Lax); genuine cross-origin dev needs either
+// real HTTPS or a same-origin setup, the same as production does.
+function sameSiteFor(secure) {
+  return secure ? "SameSite=None" : "SameSite=Lax";
+}
+
 export function buildSessionCookie(token, { secure, maxAgeSeconds }) {
   const attributes = [
     `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`,
     "Path=/",
     "HttpOnly",
-    "SameSite=None",
+    sameSiteFor(secure),
     `Max-Age=${maxAgeSeconds}`,
   ];
 
@@ -48,7 +57,7 @@ export function buildClearedSessionCookie({ secure }) {
     `${SESSION_COOKIE_NAME}=`,
     "Path=/",
     "HttpOnly",
-    "SameSite=None",
+    sameSiteFor(secure),
     "Max-Age=0",
   ];
 

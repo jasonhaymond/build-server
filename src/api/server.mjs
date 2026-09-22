@@ -238,6 +238,12 @@ function authenticate(req, res, next) {
       req.user = { id: session.userId, username: session.username, role: session.role };
       req.authMethod = "session";
       req.sessionTokenHash = tokenHash;
+      // Stashed so /api/v1/whoami can hand it back out — the client only
+      // ever receives this once, at login, and has nowhere durable to
+      // keep it (it's deliberately not in the cookie, which is httpOnly).
+      // Re-fetching it via whoami on page load is what lets a signed-in
+      // session survive a refresh without forcing a fresh login.
+      req.sessionCsrfToken = session.csrfToken;
 
       return next();
     }
@@ -754,6 +760,9 @@ app.get("/api/v1/whoami", (req, res) => {
       username: req.user.username,
       role: req.user.role,
       authMethod: "session",
+      // Lets the web UI re-establish its CSRF token after a page reload
+      // without a fresh login — see the comment in authenticate() above.
+      csrfToken: req.sessionCsrfToken,
     });
   }
 
@@ -1047,6 +1056,48 @@ app.delete("/api/v1/api-keys/:id", requireSessionOnly, (req, res) => {
   disableApiKey(key.id);
 
   return res.json({ id: key.id, enabled: false });
+});
+
+// Change your own password — requires re-entering the current one, same
+// safety bar as any other "prove it's really you" action.
+app.post("/api/v1/me/password", requireSessionOnly, (req, res) => {
+  const { currentPassword, newPassword } = req.body ?? {};
+  const user = getUserById(req.user.id);
+
+  if (!verifyPassword(currentPassword ?? "", user.passwordHash)) {
+    return res.status(401).json({ error: "Current password is incorrect." });
+  }
+
+  if (!validatePasswordLength(newPassword)) {
+    return res.status(400).json({ error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.` });
+  }
+
+  updateUserPassword(user.id, hashPassword(newPassword));
+
+  return res.json({ ok: true });
+});
+
+// Regenerates recovery codes without re-scanning a QR code (the TOTP
+// secret itself is untouched) — old codes (used or not) stop working the
+// moment new ones are issued. Requires the current password as proof of
+// intent, same as changing it.
+app.post("/api/v1/me/recovery-codes", requireSessionOnly, (req, res) => {
+  const { currentPassword } = req.body ?? {};
+  const user = getUserById(req.user.id);
+
+  if (!verifyPassword(currentPassword ?? "", user.passwordHash)) {
+    return res.status(401).json({ error: "Current password is incorrect." });
+  }
+
+  if (!user.totpEnabled) {
+    return res.status(409).json({ error: "Two-factor authentication isn't enrolled on this account." });
+  }
+
+  const recoveryCodes = generateRecoveryCodes();
+  deleteRecoveryCodesForUser(user.id);
+  createRecoveryCodes(user.id, recoveryCodes.map(hashRecoveryCode), new Date().toISOString());
+
+  return res.json({ recoveryCodes });
 });
 
 app.get("/api/v1/metrics", requireScope("metrics:read"), (req, res) => {
