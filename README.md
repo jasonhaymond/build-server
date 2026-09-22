@@ -9,7 +9,7 @@ It accepts Android/Expo/React Native source and build configuration,
 builds it in an isolated Docker container, stores the resulting APK/AAB,
 and returns a permanent public download URL.
 
-**Current version:** 2.0.0 — see [CHANGELOG.md](CHANGELOG.md) for release history.
+**Current version:** 2.1.0 — see [CHANGELOG.md](CHANGELOG.md) for release history.
 
 Architecture rationale, the source/build request schema, and the security
 model live in [PROJECT-SCOPE.md](PROJECT-SCOPE.md) (the original handoff

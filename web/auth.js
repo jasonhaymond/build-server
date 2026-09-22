@@ -438,6 +438,11 @@ export async function renderProfile() {
       </div>
       <p class="muted">Scoped to your own builds only — never anyone else's, and never system/admin actions.</p>
       <div id="keysError"></div>
+      <div id="newKeyResult"></div>
+      <label class="row" style="margin-bottom: 12px;">
+        <input type="checkbox" id="showArchivedKeys" style="width: auto;" />
+        Show revoked keys
+      </label>
       <div id="keysBody">Loading…</div>
     </div>
   `);
@@ -477,56 +482,113 @@ export async function renderProfile() {
     }
   });
 
+  let loadedKeys = [];
+
+  function renderKeysTable() {
+    const bodyEl = document.getElementById("keysBody");
+    if (!bodyEl) return;
+
+    const showArchived = document.getElementById("showArchivedKeys")?.checked ?? false;
+    const visibleKeys = showArchived ? loadedKeys : loadedKeys.filter((k) => k.enabled);
+    const archivedCount = loadedKeys.length - loadedKeys.filter((k) => k.enabled).length;
+
+    if (visibleKeys.length === 0) {
+      bodyEl.innerHTML = loadedKeys.length === 0
+        ? `<p class="muted">No API keys yet.</p>`
+        : `<p class="muted">No active keys. ${archivedCount} revoked key(s) hidden — check "Show revoked keys" above.</p>`;
+      return;
+    }
+
+    bodyEl.innerHTML = `<table>
+        <thead><tr><th>Name</th><th>Scopes</th><th>Created</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          ${visibleKeys.map((k) => `
+            <tr>
+              <td>${escapeHtml(k.name)}</td>
+              <td class="muted">${k.scopes ? escapeHtml(k.scopes.join(", ")) : "full access"}</td>
+              <td class="muted">${escapeHtml(new Date(k.createdAt).toLocaleDateString())}</td>
+              <td>${k.enabled ? "active" : "revoked"}</td>
+              <td>${k.enabled
+                ? `<button data-revoke="${k.id}">Revoke</button>`
+                : `<button class="danger" data-delete="${k.id}">Delete</button>`}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>`;
+
+    bodyEl.querySelectorAll("[data-revoke]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (!window.confirm("Revoke this API key? Anything using it will stop working immediately.")) return;
+        try {
+          await api.revokeMyApiKey(btn.dataset.revoke);
+          await loadKeys();
+        } catch (error) {
+          document.getElementById("keysError").innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
+        }
+      });
+    });
+
+    bodyEl.querySelectorAll("[data-delete]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (!window.confirm("Permanently delete this revoked key? This can't be undone.")) return;
+        try {
+          await api.deleteMyApiKey(btn.dataset.delete);
+          await loadKeys();
+        } catch (error) {
+          document.getElementById("keysError").innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
+        }
+      });
+    });
+  }
+
   async function loadKeys() {
     try {
       const { apiKeys } = await api.listMyApiKeys();
-      const bodyEl = document.getElementById("keysBody");
-      if (!bodyEl) return;
-
-      bodyEl.innerHTML = apiKeys.length === 0
-        ? `<p class="muted">No API keys yet.</p>`
-        : `<table>
-            <thead><tr><th>Name</th><th>Scopes</th><th>Created</th><th>Status</th><th></th></tr></thead>
-            <tbody>
-              ${apiKeys.map((k) => `
-                <tr>
-                  <td>${escapeHtml(k.name)}</td>
-                  <td class="muted">${k.scopes ? escapeHtml(k.scopes.join(", ")) : "full access"}</td>
-                  <td class="muted">${escapeHtml(new Date(k.createdAt).toLocaleDateString())}</td>
-                  <td>${k.enabled ? "active" : "revoked"}</td>
-                  <td>${k.enabled ? `<button data-revoke="${k.id}">Revoke</button>` : ""}</td>
-                </tr>
-              `).join("")}
-            </tbody>
-          </table>`;
-
-      bodyEl.querySelectorAll("[data-revoke]").forEach((btn) => {
-        btn.addEventListener("click", async () => {
-          if (!window.confirm("Revoke this API key? Anything using it will stop working immediately.")) return;
-          try {
-            await api.revokeMyApiKey(btn.dataset.revoke);
-            await loadKeys();
-          } catch (error) {
-            document.getElementById("keysError").innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
-          }
-        });
-      });
+      loadedKeys = apiKeys;
+      renderKeysTable();
     } catch (error) {
       const errorEl = document.getElementById("keysError");
       if (errorEl) errorEl.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
     }
   }
 
+  document.getElementById("showArchivedKeys").addEventListener("change", renderKeysTable);
+
   document.getElementById("newKeyBtn").addEventListener("click", async () => {
     const name = window.prompt("Name for this key (e.g. \"my-laptop-ci\"):");
     if (!name) return;
 
+    const errorEl = document.getElementById("keysError");
+    errorEl.innerHTML = "";
+
     try {
       const result = await api.createMyApiKey(name);
-      window.alert(`Save this key now — it won't be shown again:\n\n${result.key}`);
+
+      // A native alert()/prompt() can't be selected/copied in most
+      // browsers — shown inline instead, same pattern as recovery codes.
+      document.getElementById("newKeyResult").innerHTML = `
+        <div class="card">
+          <p class="muted">Save this key now — it won't be shown again:</p>
+          <pre class="logs">${escapeHtml(result.key)}</pre>
+          <button id="copyNewKeyBtn">Copy to clipboard</button>
+          <span id="copyNewKeyStatus" class="muted"></span>
+        </div>
+      `;
+
+      document.getElementById("copyNewKeyBtn").addEventListener("click", async () => {
+        const statusEl = document.getElementById("copyNewKeyStatus");
+
+        try {
+          await navigator.clipboard.writeText(result.key);
+          statusEl.textContent = "Copied.";
+        } catch {
+          statusEl.textContent = "Couldn't copy automatically — select the text above and copy it manually.";
+        }
+      });
+
       await loadKeys();
     } catch (error) {
-      document.getElementById("keysError").innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
+      errorEl.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
     }
   });
 

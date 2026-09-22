@@ -5,6 +5,28 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.1.0] - 2026-09-22
+
+### Added
+
+- Profile page: a "Show revoked keys" toggle hides revoked API keys by
+  default (off by default) instead of always listing every key you've
+  ever created, and a **Delete** action permanently removes an
+  already-revoked key's row (`DELETE /api/v1/api-keys/:id/purge`).
+  Deleting is gated on the key already being revoked — `409` otherwise
+  — so there's no path to destroying a still-active credential without
+  revoking it first.
+
+### Fixed
+
+- A newly-created API key was shown via `window.alert()`, whose text
+  can't be selected/copied in most browsers — found immediately after
+  shipping v2.0.0 when it turned out to be genuinely uncopyable in
+  practice. Now shown inline (same pattern already used for recovery
+  codes) with a working **Copy to clipboard** button — verified against
+  a real browser session, including reading the clipboard back to
+  confirm it matches exactly.
+
 ## [2.0.0] - 2026-09-22
 
 Real user accounts — username/password + mandatory TOTP two-factor

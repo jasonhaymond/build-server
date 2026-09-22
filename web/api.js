@@ -119,6 +119,7 @@ export const api = {
     body: JSON.stringify(scopes ? { name, scopes } : { name }),
   }),
   revokeMyApiKey: (id) => request(`/api/v1/api-keys/${id}`, { method: "DELETE" }),
+  deleteMyApiKey: (id) => request(`/api/v1/api-keys/${id}/purge`, { method: "DELETE" }),
 
   // --- System (admin) ---
   getSystemStatus: () => request("/api/v1/system"),

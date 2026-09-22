@@ -615,6 +615,14 @@ export function disableApiKey(id) {
   db.prepare(`UPDATE api_keys SET enabled = 0 WHERE id = ?`).run(id);
 }
 
+// Permanent — unlike disableApiKey (revoke), the row is actually gone
+// afterward. Only meant to be called on an already-disabled key (see
+// server.mjs's requireDisabled-before-purge check) so there's no path
+// to destroying a still-active credential without revoking it first.
+export function deleteApiKey(id) {
+  db.prepare(`DELETE FROM api_keys WHERE id = ?`).run(id);
+}
+
 
 export function createArtifactDownloadToken({
   tokenHash,

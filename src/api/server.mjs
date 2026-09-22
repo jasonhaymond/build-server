@@ -26,6 +26,7 @@ import {
   createSignupRequest,
   createUser,
   decideSignupRequest,
+  deleteApiKey,
   deleteInvite,
   deleteRecoveryCodesForUser,
   deleteSessionByTokenHash,
@@ -1056,6 +1057,30 @@ app.delete("/api/v1/api-keys/:id", requireSessionOnly, (req, res) => {
   disableApiKey(key.id);
 
   return res.json({ id: key.id, enabled: false });
+});
+
+// Permanently removes an already-revoked key's row — gated on it
+// already being disabled so there's no path to destroying a still-active
+// credential without revoking it first (and losing whatever audit value
+// its row still has while active).
+app.delete("/api/v1/api-keys/:id/purge", requireSessionOnly, (req, res) => {
+  const key = getApiKeyById(Number(req.params.id));
+
+  if (!key || key.userId !== req.user.id) {
+    return res.status(404).json({
+      error: "API key not found.",
+    });
+  }
+
+  if (key.enabled) {
+    return res.status(409).json({
+      error: "Revoke this key before deleting it.",
+    });
+  }
+
+  deleteApiKey(key.id);
+
+  return res.status(204).send();
 });
 
 // Change your own password — requires re-entering the current one, same

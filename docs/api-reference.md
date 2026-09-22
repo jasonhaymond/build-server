@@ -478,12 +478,19 @@ Lists the signed-in account's own keys only (no plaintext, ever):
 
 ### `DELETE /api/v1/api-keys/:id`
 
-Disables (doesn't delete the row) a key — `404` if it doesn't exist or
-belongs to a different account.
+Revokes (disables, doesn't delete the row) a key — `404` if it doesn't
+exist or belongs to a different account.
 
 ```json
 { "id": 4, "enabled": false }
 ```
+
+### `DELETE /api/v1/api-keys/:id/purge`
+
+Permanently deletes an already-revoked key's row. `409` if the key is
+still active (revoke it first — `DELETE /api/v1/api-keys/:id` above);
+`404` if it doesn't exist or belongs to a different account. `204` on
+success.
 
 ## Metrics & system (admin)
 

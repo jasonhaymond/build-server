@@ -124,10 +124,14 @@ Your own account settings:
   `curl`/CI job, not a browser). A key you create here is scoped to
   *your* builds only — never anyone else's, and never able to manage
   users or the server. Each key's plaintext is shown exactly once, right
-  when you create it; save it somewhere real, since it can't be
-  retrieved again, only revoked and replaced. See
-  [api-reference.md](api-reference.md) for using a key directly (e.g.
-  from a CI pipeline) instead of through this UI.
+  when you create it, with a **Copy to clipboard** button — save it
+  somewhere real, since it can't be retrieved again, only revoked and
+  replaced. Revoked keys are hidden by default (tick **Show revoked
+  keys** to see them); once revoked, a key can be **Delete**d
+  permanently if you don't want it cluttering the list anymore — this is
+  just tidying up, the key already stopped working the moment it was
+  revoked. See [api-reference.md](api-reference.md) for using a key
+  directly (e.g. from a CI pipeline) instead of through this UI.
 
 ## Admin page
 
