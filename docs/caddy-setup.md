@@ -138,6 +138,16 @@ the Caddy layer — **the API already handles CORS itself** via
 in Caddy on top of that; it would only weaken what the API already gets
 right.
 
+The automatic HTTPS here isn't just nice-to-have: signing into the web
+UI sets a `SameSite=None` session cookie (real HTTP auth, separate from
+API keys) so it can be sent across these two hostnames, and every
+browser refuses to store a `SameSite=None` cookie that isn't also
+`Secure` — confirmed directly against a real browser session, which
+silently dropped the cookie entirely the one time this was tried without
+HTTPS. Skip this Caddy setup (e.g. testing directly against `PORT`/
+`WEB_PORT` over plain `http://`) and sign-in will appear to succeed but
+never actually stick — see `deployment.md`'s Troubleshooting section.
+
 ## Why a Cache-Control header matters here
 
 `web/` is hand-authored with no build step and no versioned/hashed

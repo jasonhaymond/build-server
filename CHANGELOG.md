@@ -5,6 +5,77 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.0.0] - 2026-09-22
+
+Real user accounts — username/password + mandatory TOTP two-factor
+authentication, entirely separate from API keys — with per-user
+workspace isolation, invite/request-access signup, and admin broadcast
+notifications. The biggest change to this project's security model to
+date, shipped as five reviewable phases (schema/crypto primitives,
+session auth + login/MFA/invites/request-access, admin management,
+the web UI rewrite, and this release pass) — see the commit history for
+each phase's own detailed notes.
+
+### Added
+
+- Real HTTP authentication: username/password sign-in, mandatory TOTP
+  enrollment (RFC 6238, hand-rolled with `node:crypto` — verified
+  against the RFC's own test vector — no auth library dependency) with
+  a real scannable QR code (`qrcode`, the only new dependency), and
+  single-use recovery codes. Sessions are DB-backed, cookie-based
+  (`SameSite=None; Secure` in production, `Lax` for genuine same-origin
+  local dev), with CSRF protection via a token returned at login and
+  echoed back as `X-CSRF-Token` on every mutating request.
+- Two roles, `admin` and `user`. Admin actions (`/api/v1/system/*`,
+  user/invite/signup-request management, broadcasting) are gated by
+  role on a signed-in session — **never satisfiable via an API key**,
+  even a previously full-access one.
+- **Absolute per-user isolation.** Every build, log, artifact, and API
+  key is scoped to exactly one workspace — including for admins, who
+  get zero visibility into any user's build data. The only sanctioned
+  exception is an admin's broadcast notification, shown as a dismissible
+  banner to every signed-in account.
+- Invite-link signup (`scripts/create-user.mjs` bootstraps the very
+  first admin; every account after that is invited from the admin Users
+  panel) and a moderated "request access" flow — a public form
+  resisted with a honeypot field, a minimum-dwell-time check, and a
+  signed arithmetic challenge (no external CAPTCHA service), queued for
+  an admin to approve (turns into an invite) or reject.
+- Admin panel gains four tabs alongside the existing Overview: Users
+  (enable/disable, promote/demote, reset password/2FA), Invites, Signup
+  requests, and Broadcast.
+- A profile page: change password, regenerate 2FA recovery codes, and
+  create/revoke your own API keys — API keys now live inside a user's
+  profile rather than existing standalone, and can no longer mint more
+  keys or reach any admin action themselves.
+- 66 new automated tests (auth, signup/invites/request-access, admin
+  management, a dedicated isolation suite, and a legacy-API-key
+  compatibility regression) — 149 passing total.
+
+### Changed (breaking)
+
+- `build:read:any` is removed entirely — there is no cross-tenant read
+  bypass of any kind anymore, for any key or role.
+- `system:manage` and `api-key:manage` are removed from the set of
+  scopes an API key can carry. Server updates/backups/logs and API-key
+  creation/listing/revocation are now pure session+role (or
+  session-only) checks. A bare API key that previously had
+  `system:manage` now gets a 403 on every `/api/v1/system/*` route —
+  see `docs/deployment.md`'s Troubleshooting section if this affects
+  existing automation.
+- The web UI's sign-in screen no longer accepts a pasted API key at
+  all. `web/config.js` now holds the API's origin as a one-line
+  deployment setting instead of something typed in at every sign-in.
+
+### Compatibility
+
+- **Every pre-v2.0.0 API key keeps working exactly as before, unowned.**
+  `builds.user_id` and `api_keys.user_id` are new, nullable columns —
+  a legacy key with no `user_id` falls back to the exact `api_key_id`
+  comparison this project used before any of this existed. Nothing
+  breaks the moment this version deploys; migrating a key into a real
+  user's profile is optional and can happen whenever convenient.
+
 ## [1.2.1] - 2026-09-21
 
 ### Fixed

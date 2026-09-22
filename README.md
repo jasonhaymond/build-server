@@ -9,7 +9,7 @@ It accepts Android/Expo/React Native source and build configuration,
 builds it in an isolated Docker container, stores the resulting APK/AAB,
 and returns a permanent public download URL.
 
-**Current version:** 1.2.1 — see [CHANGELOG.md](CHANGELOG.md) for release history.
+**Current version:** 2.0.0 — see [CHANGELOG.md](CHANGELOG.md) for release history.
 
 Architecture rationale, the source/build request schema, and the security
 model live in [PROJECT-SCOPE.md](PROJECT-SCOPE.md) (the original handoff
@@ -37,7 +37,17 @@ The API container talks to the host's Docker daemon over a mounted socket
 (Docker-outside-of-Docker) so it can launch isolated build containers —
 see [docs/deployment.md](docs/deployment.md) for what that implies.
 
-Create an API key (required for every authenticated endpoint):
+Bootstrap the first admin account (real username/password + mandatory
+TOTP sign-in — separate from API keys, see API keys below):
+
+```bash
+docker compose exec api node scripts/create-user.mjs
+```
+
+Sign into the web UI with it (walks you through 2FA enrollment), then
+create everything else — invites for other accounts, your own API
+keys — from there. Or create a standalone API key directly, for
+scripted/CI use with no user attached:
 
 ```bash
 docker compose exec api node scripts/create-api-key.mjs "some client name"
@@ -52,7 +62,7 @@ its SHA-256 hash is stored. Save it somewhere real before continuing.
 npm install
 node scripts/setup.mjs   # answer "no" to the Docker Compose prompt
 docker build -t build-server-android:latest .
-node scripts/create-api-key.mjs "some client name"
+node scripts/create-user.mjs   # bootstrap the first admin account
 npm run api
 ```
 
@@ -82,20 +92,28 @@ schema in more depth.
 
 ## API keys and scopes
 
-Keys created without `--scopes` get full access. Restrict a key with:
+API keys are a narrower, separate thing from a real account — meant for
+scripted/CI access, never for signing into the web UI or reaching any
+admin action (server updates/backups/logs, user/invite management, and
+broadcasts are pure signed-in-admin-session checks now, not satisfiable
+via a key at all). A key created from a user's own profile in the web UI
+is tied to that user — its builds are that user's builds, in that user's
+workspace, isolated from every other account including admins. A key
+created with `scripts/create-api-key.mjs` (no user attached) keeps
+working exactly like every key did before accounts existed — unowned,
+its own isolated bucket.
+
+Keys created without `--scopes` get full access to the remaining
+(non-admin) actions. Restrict a key with:
 
 ```bash
 node scripts/create-api-key.mjs "ci-bot" --scopes build:create,build:read,build:logs,artifact:download
 ```
 
-Known scopes: `build:create`, `build:read`, `build:read:any` (cross-tenant
-ownership bypass — combine with `build:read`/`build:logs`/
-`artifact:download`/`build:cancel` for the specific admin action needed),
-`build:logs`, `build:cancel`, `artifact:download`, `artifact:manage`,
-`api-key:manage`, `metrics:read`, `system:manage` (version/update/log
-admin panel — see Deployment below). Builds are isolated per API key — a
-key can only see/cancel/download its own builds unless it also holds
-`build:read:any`.
+Known scopes: `build:create`, `build:read`, `build:logs`, `build:cancel`,
+`artifact:download`, `artifact:manage`, `metrics:read`. Isolation is
+absolute — a key only ever sees/cancels/downloads its own builds, full
+stop; there is no scope that grants visibility into another workspace.
 
 ## Deployment
 
@@ -134,36 +152,49 @@ right here on the build-server host next to the API — a separate
 public-facing Caddy just `reverse_proxy`s to it, the same way it does for
 the API, rather than serving files itself. Needs `WEB_UI_ORIGIN` set in
 `.env` for CORS, since its public hostname is a different origin than the
-API's. Sign-in is a manually-pasted API key kept only in that browser
-tab's session storage.
+API's — and needs **real HTTPS on both hostnames**, not just for
+security hygiene: the cross-origin session cookie is `SameSite=None`,
+which every browser refuses to store without `Secure` (confirmed
+directly against a real browser session). See
+[docs/caddy-setup.md](docs/caddy-setup.md).
 
-A `system:manage`-scoped key also gets an **Admin** page: current version
-vs. the latest GitHub tag (`GITHUB_REPO` in `.env`), a button that
-triggers a real `scripts/update.sh` run (every safety guard intact —
-uncommitted-changes check, pre-update snapshot, health-check poll) via a
-sibling container spawned over the same Docker socket the build workers
-already use, a "Back up now" button (same `scripts/backup.mjs` logic), a
-build-metrics summary, and a tail of the API's own operational log.
-Signing in only needs a *valid* key, not any particular scope, so an
-admin-only key isn't locked out. The UI has its own in-app **Help** page
-(reachable signed in or out) covering all of this from a user's
-perspective; see [docs/using-the-web-ui.md](docs/using-the-web-ui.md) for
-the full walkthrough, [docs/caddy-setup.md](docs/caddy-setup.md) for the
-Caddy config, or
-[docs/deployment.md](docs/deployment.md#web-ui-optional) for
+Sign-in is a real account — username, password, and a mandatory TOTP
+second factor, kept as a session cookie — never a pasted API key.
+Bootstrap the first admin with `scripts/create-user.mjs` (see Setup
+above); every account after that is invited from the admin Users panel,
+or self-requested via the sign-in page's "Request access" and approved
+by an admin. Every account, including admins, is isolated from every
+other account's builds/logs/artifacts/API keys — the one exception is an
+admin's broadcast notification, shown to everyone as a dismissible
+banner.
+
+Signed in as an admin, the **Admin** page adds Users, Invites, Signup
+requests, and Broadcast tabs alongside the existing Overview (version
+vs. latest GitHub tag, a real `scripts/update.sh` trigger via a sibling
+container over the same Docker socket the build workers use, a
+`scripts/backup.mjs`-backed "Back up now" button, build metrics, and a
+tail of the API's own operational log) — reachable only via a signed-in
+admin session, never an API key, however permissive. The UI has its own
+in-app **Help** page (reachable signed in or out) covering all of this
+from a user's perspective; see
+[docs/using-the-web-ui.md](docs/using-the-web-ui.md) for the full
+walkthrough, [docs/caddy-setup.md](docs/caddy-setup.md) for the Caddy
+config, or [docs/deployment.md](docs/deployment.md#web-ui-optional) for
 `GITHUB_REPO`/`API_IMAGE` setup and the update-trigger's architecture.
 
 ## Status
 
-v1.0.0: persistent build queue with restart recovery, artifact metadata,
-API key scopes, build cancellation, retention cleanup, multi-tenant
-isolation, structured logging, real health checks, Docker Compose
+v2.0.0: real user accounts (username/password + mandatory TOTP,
+separate from API keys), absolute per-user workspace isolation with no
+admin bypass, invite/request-access signup, and admin broadcast
+notifications, on top of the v1.0.0 foundation — persistent build queue
+with restart recovery, artifact metadata, build cancellation, retention
+cleanup, structured logging, real health checks, Docker Compose
 containerization, an automated test suite/CI, setup/update/backup
-tooling, a web UI, and an admin panel with a working update-trigger
-button are all in place and tested. See PROJECT-SCOPE.md's "Current Known
-Limitations" section for what's still open (production alerting, a
-dedicated build-runner replacing Docker-outside-of-Docker) before relying
-on this at real scale.
+tooling, and an admin panel with a working update-trigger button. See
+PROJECT-SCOPE.md's "Current Known Limitations" section for what's still
+open (production alerting, a dedicated build-runner replacing
+Docker-outside-of-Docker) before relying on this at real scale.
 
 ## Running tests
 

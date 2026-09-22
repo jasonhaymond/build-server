@@ -4,45 +4,49 @@ This is for actually using the dashboard — submitting builds, checking on
 them, downloading artifacts. If you're setting the web UI up on a server,
 see [deployment.md](deployment.md#web-ui-optional) instead.
 
+## Getting an account
+
+Every account is real: a username and password, plus a mandatory
+second factor (TOTP via an authenticator app — Google Authenticator,
+Authy, 1Password, etc.). There's no way to skip the second factor, and
+no way to sign in with just an API key — that's a separate, narrower
+thing (see API keys, below).
+
+Two ways to get an account:
+
+- **An admin invites you directly.** They'll send you a one-time link
+  (`#/signup?token=...`). Open it, set a password, and you'll be walked
+  straight into scanning a QR code to finish setup.
+- **Request access yourself.** Click **Need an account?** on the sign-in
+  page, fill in a username (and optionally an email/message so an admin
+  knows who's asking), answer the simple math check, and submit. An
+  admin reviews it and, if approved, sends you an invite link the same
+  way as above — submitting a request doesn't create an account by
+  itself.
+
 ## Signing in
 
-You'll need two things from whoever administers this deployment:
+Username and password, then a 6-digit code from your authenticator app
+(or one of your recovery codes, shown to you once when you finished
+enrolling — see Profile below). If sign-in fails, the error is specific:
+wrong username/password, or an invalid/expired code.
 
-- **The API base URL** — where the build-server API itself lives (not the
-  web UI's own address). Something like `https://builds-api.example.com`
-  — commonly on a distinguishing subdomain from the web UI's own address
-  (e.g. `https://builds.example.com`), so don't assume they're the same
-  hostname.
-- **An API key** — a string starting with `abs_`, created for you with
-  `scripts/create-api-key.mjs` or the Admin page's API key tooling. It's
-  shown to whoever created it exactly once, so if you don't have one yet,
-  ask them for it directly (it can't be looked up or recovered after the
-  fact — only replaced with a new one).
+There's no "API base URL" field to fill in anymore — the web UI already
+knows where its API is (set once by whoever deployed it).
 
-Open the web UI, paste both into the sign-in form, and sign in. The key
-is stored only in that browser tab's session storage — it's never sent
-anywhere but this API, and it's gone the moment you sign out or close the
-tab. You'll need to paste it again next time; that's intentional, not a
-bug.
-
-If sign-in fails, the error message is the API's own — most commonly
-"Unauthorized" (the key was mistyped, or has been revoked) or a
-connection error (wrong base URL, or the server is down).
-
-**What you can do depends on what your key is scoped for.** A key might
-only be able to submit builds and watch its own, or it might also see
-every client's builds, manage other keys, or reach the Admin page. If
-something in this guide 403s for you ("API key missing required scope:
-..."), that action isn't part of what your key was granted — ask whoever
-administers this deployment.
+**Everything you see is scoped to your own account.** Builds, logs,
+artifacts, API keys — none of it is visible to any other user, including
+admins. The one exception is a broadcast notification an admin sends to
+everyone (shown as a dismissible banner at the top of the page) — that's
+deliberate and the only thing that ever crosses accounts.
 
 ## Dashboard
 
-The **Dashboard** (the page you land on after signing in) lists builds —
-your own, or every client's if your key has that kind of access. Each row
-shows the project name, current status, platform, and when it was
-submitted. Click a project name to open that build's detail page. The
-list refreshes itself every 5 seconds, or click **Refresh** to force it.
+The **Dashboard** (the page you land on after signing in) lists your own
+builds. Each row shows the project name, current status, platform, and
+when it was submitted. Click a project name to open that build's detail
+page. The list refreshes itself every 5 seconds, or click **Refresh** to
+force it.
 
 **Status meanings:**
 
@@ -105,32 +109,60 @@ Shows the build's status, platform/variant/artifact, timestamps, and:
 
 This page also auto-refreshes every few seconds while you have it open.
 
+## Profile
+
+Your own account settings:
+
+- **Change password** — needs your current password.
+- **Two-factor authentication** — shows whether it's enrolled (always,
+  once you've finished signing up) and lets you **regenerate recovery
+  codes** (needs your current password; invalidates every code issued
+  before). If you lose your authenticator app entirely, an admin has to
+  reset your enrollment from their side — there's no self-service
+  recovery for that.
+- **My API keys** — create or revoke keys for scripted/CI access (a
+  `curl`/CI job, not a browser). A key you create here is scoped to
+  *your* builds only — never anyone else's, and never able to manage
+  users or the server. Each key's plaintext is shown exactly once, right
+  when you create it; save it somewhere real, since it can't be
+  retrieved again, only revoked and replaced. See
+  [api-reference.md](api-reference.md) for using a key directly (e.g.
+  from a CI pipeline) instead of through this UI.
+
 ## Admin page
 
-Only visible in the sense that it's always in the nav, but everything on
-it requires your key to have admin-level access — otherwise you'll see a
-single "missing required scope" message instead of the page contents.
-If you have access:
+Requires an admin account, **signed in** — an API key, even a
+full-access one, can never reach this page or its underlying endpoints.
+Five tabs:
 
-- **Version** — what's currently running, and (if this deployment checks
-  GitHub for updates) whether a newer version exists.
-- **Update now** — redeploys the service to the latest version, or to a
-  specific tag if you type one in first. This is a real action with real
-  consequences — it briefly restarts the live service — so it asks you
-  to confirm before doing anything.
-- **Back up now** — snapshots the database and configuration to the
-  server's `backups/` directory on demand. Doesn't need a confirmation;
-  it's not destructive.
-- **Queue** — how many builds are waiting/running right now, plus a
-  breakdown of build counts by status and average build duration.
-- **API log** — the service's own operational log (not any one build's
-  log), for diagnosing problems with the service itself.
+- **Overview** — running version (and whether a newer one's available,
+  if this deployment checks GitHub), a real **Update now** / **Back up
+  now** trigger, the build queue's current depth, and a tail of the
+  service's own operational log. "Total builds across every account" is
+  a bare count for capacity planning — it doesn't expose any individual
+  build's content.
+- **Users** — every account (username, role, 2FA status, enabled/
+  disabled, last login). Promote/demote, enable/disable, force a
+  password reset (generates a link for you to send the user — this repo
+  doesn't send email itself) or force 2FA re-enrollment (for a lost
+  authenticator). You can't disable or demote your own account, on
+  purpose. This never shows any user's builds, logs, or keys — admin
+  manages *accounts*, not account *data*.
+- **Invites** — create a one-time signup link for a specific role
+  (optionally pre-filled with a suggested username), see pending/used/
+  expired invites, and revoke an unused one.
+- **Signup requests** — anyone who used "Request access" on the sign-in
+  page shows up here. **Approve** (choosing their role) turns it into an
+  invite link the same as above; **Reject** just marks it decided.
+- **Broadcast** — send a message that appears as a dismissible banner
+  for every signed-in user. This is the one deliberate exception to
+  every account's isolation from every other — use it for things like
+  "restarting the server for an update shortly."
 
 ## Getting help
 
-- If an action fails with a scope-related error, that's about what your
-  specific key can do, not a bug — ask your deployment's admin.
-- For what each API endpoint actually does under the hood, see
+- For what each API endpoint actually does under the hood — including
+  using an API key directly instead of through this UI — see
   [api-reference.md](api-reference.md).
 - For deploying or configuring the web UI itself, see
   [deployment.md](deployment.md#web-ui-optional).

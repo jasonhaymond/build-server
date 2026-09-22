@@ -147,15 +147,34 @@ Verify it's actually serving traffic:
 curl http://localhost:${PORT:-8080}/health
 ```
 
-Create your first API key:
+Bootstrap the first admin account (refuses if any account already
+exists — every account after this one is created by inviting them from
+the web UI's admin Users panel, not this script):
 
 ```bash
-docker compose exec api node scripts/create-api-key.mjs "my-first-client"
+docker compose exec api node scripts/create-user.mjs
 ```
 
-Save the printed key now — it's shown once and isn't recoverable; only its
-hash is stored. Then set up the reverse proxy — see
+It prompts for a username and password; two-factor authentication is
+mandatory, so the first sign-in at the web UI walks through scanning a
+QR code before a session is issued — there's no way to skip that step,
+including for this first account. Then set up the reverse proxy — see
 **[caddy-setup.md](caddy-setup.md)**.
+
+API keys are a separate, narrower thing from an account — they live in
+a signed-in user's own profile (create one from the web UI's Profile
+page once you can sign in) and are meant for scripted/CI access, not
+for signing into the web UI itself. `scripts/create-api-key.mjs` still
+exists for a key that doesn't belong to any user (a system-level/CI
+key, functionally identical to how every key worked before v2.0.0) —
+prefer the profile UI for a real person's own key:
+
+```bash
+docker compose exec api node scripts/create-api-key.mjs "some-system-name"
+```
+
+Save the printed key now — it's shown once and isn't recoverable; only
+its hash is stored.
 
 ## Updating
 
@@ -331,37 +350,45 @@ API gets the `builds-api.<domain>` subdomain), then `docker compose up
 -d` (or restart the non-Compose process) to pick it up. Leaving it unset
 means no cross-origin access at all — never set it to a wildcard.
 
-Sign-in is a manually-pasted API key (created with
-`scripts/create-api-key.mjs`), kept only in that browser tab's session
-storage — cleared on sign-out or tab close, never sent anywhere but this
-API. This is a deliberate, documented simplification for now, not real
-user accounts/sessions — PROJECT-SCOPE.md itself describes those as
-"Eventually," with no concrete design given (no user table, no password
-policy). A key with `build:read:any` sees every client's builds in the
-dashboard, matching its API-level access; a scoped key only sees its own.
+**This isn't just a CORS setting — real HTTPS on both hostnames is a
+hard requirement, not a recommendation, for sign-in to work at all**
+across these two origins. The session cookie (real HTTP auth, separate
+from API keys) is `SameSite=None` so it can be sent cross-origin, and
+every browser refuses to store a `SameSite=None` cookie that isn't also
+`Secure` — confirmed directly: a real Chromium session silently dropped
+the cookie entirely (not a fallback to some other behavior) the one time
+this was tested without HTTPS. `COOKIE_SECURE=false` (`.env`) exists for
+local development only, and only works when the web UI and API are
+served from the **same** origin there (no separate hostnames/ports) —
+see [caddy-setup.md](caddy-setup.md) for the real topology.
 
-### Admin page (version, update trigger, backups, logs)
+Sign-in is a real account — username, password, and a mandatory TOTP
+second factor — kept as a session cookie, not a pasted API key. See
+[using-the-web-ui.md](using-the-web-ui.md) for what that flow looks
+like, and Bootstrapping below for creating the first account. API keys
+still exist, but as a narrower, separate thing: they live in a signed-in
+user's own profile, for scripted/CI access, and can never sign into the
+web UI or reach the Admin page.
 
-A key with the `system:manage` scope sees an **Admin** page: current
-version vs. the latest GitHub tag (`GITHUB_REPO`), a build-metrics
-summary, a tail of the API's own operational log
-(`GET /api/v1/system/logs`), a **Back up now** button
+### Admin page (accounts, invites, broadcasts, version, update trigger, backups, logs)
+
+Signed in as an admin (role, not a scope — an API key can never reach
+this page, however permissive), the **Admin** page has five tabs: an
+Overview with the running version vs. the latest GitHub tag
+(`GITHUB_REPO`), a build-metrics summary, a tail of the API's own
+operational log (`GET /api/v1/system/logs`), a **Back up now** button
 (`POST /api/v1/system/backup`, runs the same `runBackup()` logic as
 `scripts/backup.mjs` — one implementation, two callers, and now the exact
-same in-container invocation either way), and an
-**Update now** button. This is the in-app equivalent of running
+same in-container invocation either way), and an **Update now** button;
+plus Users, Invites, Signup requests, and Broadcast for the account-
+management side — see [using-the-web-ui.md](using-the-web-ui.md) for
+what each of those does. This is the in-app equivalent of running
 `scripts/update.sh`/`scripts/backup.mjs` over SSH, per the project's
 built-in-update-visibility and backups standards — same scripts, same
 safety guards, just triggered from a browser instead of a terminal. The
 update button shows a confirmation dialog before firing, since it
 redeploys the live service; the backup button doesn't need one (it's not
 destructive).
-
-Signing in only requires a *valid* key (`GET /api/v1/whoami`, no
-particular scope) — an admin-only key with `system:manage` but not
-`build:read` can still sign in and use the Admin page; it just can't load
-the build dashboard, and shows a clear scope error there instead of being
-silently locked out of signing in at all.
 
 **How it actually works** — the API container only has its own source
 baked into its image at build time, not the live git repo or
@@ -448,6 +475,28 @@ web UI is actually served from (scheme + host, e.g.
 `https://builds.example.com`, no trailing slash), and the API must be
 restarted after changing it. If it's unset, no cross-origin request is
 allowed at all — intentional, not a bug.
+
+**Sign-in appears to succeed (no error shown) but the dashboard just
+loops back to the sign-in page** — almost always a missing session
+cookie, not a bad password/code. Open DevTools → Application → Cookies
+and check whether `bs_session` actually got set. If it didn't: either
+one of the two hostnames isn't on real HTTPS yet (the cross-origin
+session cookie is `SameSite=None`, which every browser refuses to store
+without `Secure` — see the Web UI section above), or `COOKIE_SECURE` is
+set to `false` while the web UI and API are on different origins, which
+can't work locally either. This isn't a bug to route around — either
+put real HTTPS on both hostnames, or use `COOKIE_SECURE=false` only when
+both are genuinely the same origin.
+
+**Everything under `/api/v1/system/*` (the Admin page's Overview tab)
+now requires signing in as an admin — an API key gets a 403, even a
+previously-working `system:manage`-scoped one** — this is a deliberate
+v2.0.0 breaking change, not a regression: server updates, backups, and
+log access can no longer be triggered by a Bearer key at all, so a
+leaked CI key can't touch any of it. If you had automation calling these
+endpoints directly with an API key, it needs to go through an
+admin-signed-in session instead (or ask whoever administers this
+deployment to do it from the Admin page).
 
 **The Admin page's "Update now" button returns `HOST_PROJECT_DIR and
 API_IMAGE must be set`** — this only works for Docker Compose deployments
