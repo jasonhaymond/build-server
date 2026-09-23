@@ -5,6 +5,28 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.3.4] - 2026-09-22
+
+### Fixed
+
+- **Every debug APK crashed immediately on install** with "Unable to load
+  script... Make sure you're running Metro" — the very next problem after
+  `2.3.2` fixed the build itself failing. Root cause: the React Native
+  Gradle Plugin's default `debuggableVariants` is `["debug",
+  "debugOptimized"]`, and any variant in that list gets **no JS bundle
+  packaged into the APK at all** — it's built on the assumption a debug
+  build always has a Metro dev server on the same machine/network to fetch
+  JS from at runtime. That's true for local development, never true for an
+  APK downloaded and installed standalone on a phone, which is this whole
+  project's reason to exist (no release-signing support yet, so every
+  build is `debug`). The worker now appends a second `react { }` block
+  (Gradle merges same-named extension blocks, so this is simpler and more
+  robust than editing Expo's generated one in place) setting
+  `debuggableVariants = []` right after `expo prebuild`, so the debug
+  build gets its JS bundled and embedded like a real standalone build
+  would. Found on Clocker's first install of an actual `2.3.2`-fixed
+  build — confirmed by the exact "Unable to load script" crash screen.
+
 ## [2.3.3] - 2026-09-22
 
 ### Fixed

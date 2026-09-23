@@ -455,7 +455,33 @@ if [ ! -d android ]; then
   echo "ERROR: Expo prebuild did not create an android directory."
   exit 1
 fi
+${
+  job.build.variant === "debug"
+    ? `
+echo
+echo "=== Enabling JS bundling for the debug build ==="
 
+# The React Native Gradle Plugin's default 'debuggableVariants' is
+# ["debug", "debugOptimized"] — variants in that list get NO JS bundle
+# packaged into the APK at all, on the assumption a debug build always has
+# a Metro dev server to fetch JS from at runtime. That's true on a dev
+# machine, but never true for an APK downloaded and installed standalone
+# on someone's phone (this build-server's entire reason to exist, since it
+# has no release-signing support to produce a real release build instead)
+# — installing one produces exactly the "Unable to load script... Make
+# sure you're running Metro" crash, every time, with no JS ever bundled.
+# A second react { } block (Gradle merges same-named extension blocks) is
+# simpler and more robust than trying to edit Expo's generated block in
+# place.
+cat >> android/app/build.gradle <<'GRADLE_EOF'
+
+react {
+    debuggableVariants = []
+}
+GRADLE_EOF
+`
+    : ""
+}
 echo
 echo "=== Configuring Gradle memory ==="
 
