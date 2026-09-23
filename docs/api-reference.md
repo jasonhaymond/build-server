@@ -426,13 +426,18 @@ Scope: `artifact:download`.
   "id": "bld_mabc123_a1b2c3d4",
   "artifacts": [
     {
-      "filename": "Example-release.apk",
+      "filename": "Example-v1.4.0-release.apk",
       "size": 95600000,
-      "downloadUrl": "https://builds-api.example.com/download/<token>/Example-release.apk"
+      "downloadUrl": "https://builds-api.example.com/download/<token>/Example-v1.4.0-release.apk"
     }
   ]
 }
 ```
+
+`filename` is `<project name>[-v<version>]-<variant>.<artifact>` — the
+`-v<version>` segment is included only when `projectRoot`'s own
+`package.json` has a non-empty `version` field, omitted otherwise (just
+`Example-release.apk`).
 
 `downloadUrl` is permanent, unauthenticated, and unguessable (see below)
 — it's registered by the worker at build time, not generated on demand.

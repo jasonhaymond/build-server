@@ -5,6 +5,20 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.4.0] - 2026-09-23
+
+### Added
+
+- **Artifact filenames now include the project's version, when one is
+  configured**: `Clocker-v2.12.2-debug.apk` instead of a plain
+  `Clocker-debug.apk`, making it possible to tell two downloaded builds
+  apart without checking dates or re-installing. Read from the
+  project's own `package.json` `version` field at `projectRoot` (not
+  anything Expo-specific like `app.json`'s `expo.version`, which tracks
+  the Play Store `versionName` and is easy to forget to bump separately)
+  — falls back to the previous version-less filename when that field is
+  missing or empty. See [docs/api-reference.md](docs/api-reference.md).
+
 ## [2.3.6] - 2026-09-22
 
 ### Fixed

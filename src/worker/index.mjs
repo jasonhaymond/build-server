@@ -434,9 +434,26 @@ const safeProjectName = job.project.name.replace(
   "-",
 );
 
+// Read straight from the project's own package.json rather than anything Expo-specific
+// (app.json's `expo.version`, say) — that field tracks the Play Store `versionName` and
+// is easy to forget to bump, unlike package.json's version, which every npm project has by
+// convention and this build-server already requires present (checked above). No version
+// field (or no package.json at projectRoot at all, though that's already fatal above)
+// falls back to the plain, version-less filename this always used before.
+let projectVersion = null;
+try {
+  const projectPackageJson = JSON.parse(readFileSync(join(projectRoot, "package.json"), "utf8"));
+  if (typeof projectPackageJson.version === "string" && projectPackageJson.version.trim()) {
+    projectVersion = projectPackageJson.version.trim().replace(/[^a-zA-Z0-9._-]+/g, "-");
+  }
+} catch {
+  // Malformed package.json would already have failed the "package.json found" check
+  // above before we get here — nothing more to do than skip the version in the filename.
+}
+
 const artifactDestination = resolve(
   artifactsDir,
-  `${safeProjectName}-${job.build.variant}.${job.build.artifact}`,
+  `${safeProjectName}${projectVersion ? `-v${projectVersion}` : ""}-${job.build.variant}.${job.build.artifact}`,
 );
 
 // Platform-prefixed so builds for other platforms (added later) can't
