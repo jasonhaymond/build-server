@@ -5,6 +5,22 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.3.5] - 2026-09-22
+
+### Fixed
+
+- The build detail page's log viewer reset to the top on every 4-second
+  poll, since each poll fully replaces the section's HTML — jarring if
+  you'd scrolled up to read something earlier in the log. Now preserves
+  the exact scroll position across polls, except when already at (or
+  very near) the bottom, where it keeps following newly-appended output
+  instead — a live "tail -f" of a running build, the more useful default
+  when you haven't deliberately scrolled away. Verified against a real
+  browser session with a genuinely growing, taller-than-viewport log:
+  confirmed a mid-scroll position survives multiple poll cycles
+  unchanged, and confirmed being scrolled to the bottom keeps following
+  the bottom as more lines arrive.
+
 ## [2.3.4] - 2026-09-22
 
 ### Fixed

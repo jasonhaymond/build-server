@@ -297,6 +297,18 @@ async function renderBuildDetail(id) {
       const canCancel = ["queued", "building"].includes(build.status);
       const logText = typeof logs === "string" ? logs : (logs.logs ?? "");
 
+      // Every poll replaces this whole section, which would otherwise
+      // silently reset the log viewer's scroll position back to the top
+      // each time — jarring if you've scrolled up to read something.
+      // Preserve the exact position, except when already at (or very
+      // near) the bottom, where following newly-appended output is the
+      // more useful default (a live "tail -f" of a running build).
+      const previousLogsEl = bodyEl.querySelector(".logs");
+      const wasAtBottom = previousLogsEl
+        ? previousLogsEl.scrollHeight - previousLogsEl.scrollTop - previousLogsEl.clientHeight < 20
+        : true;
+      const previousScrollTop = previousLogsEl?.scrollTop ?? 0;
+
       bodyEl.innerHTML = `
         <div class="card">
           <div class="spaced">
@@ -331,6 +343,11 @@ async function renderBuildDetail(id) {
           <pre class="logs">${escapeHtml(logText || "(no logs yet)")}</pre>
         </div>
       `;
+
+      const newLogsEl = bodyEl.querySelector(".logs");
+      if (newLogsEl) {
+        newLogsEl.scrollTop = wasAtBottom ? newLogsEl.scrollHeight : previousScrollTop;
+      }
 
       const cancelBtn = document.getElementById("cancelBtn");
       if (cancelBtn) {
