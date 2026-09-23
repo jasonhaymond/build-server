@@ -5,6 +5,29 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.3.2] - 2026-09-22
+
+### Fixed
+
+- **Every real Android build failed at the very first write into its job
+  directory** — `npm install` (or, for a non-monorepo project, whatever
+  wrote first) hit `EACCES: permission denied, mkdir '.../node_modules'`
+  inside the isolated build container. Root cause: `src/worker/index.mjs`
+  stages the git-cloned source (`mkdirSync`/`cpSync`) as itself — and the
+  worker runs as root inside its own container, since Docker-outside-of-
+  Docker needs the socket — but then hands that root-owned directory to the
+  build container via `docker run --user <uid>:<gid>`, a deliberately
+  non-root user. Root's directories default to not-writable-by-other, so
+  the very first file the build container tried to create failed. Found
+  immediately on Clocker's first real build attempt after the `2.3.1` fix
+  above got it past the git-clone step. Fixed by `chown -R <uid>:<gid>` on
+  the job directory right after staging, before the build container starts
+  — root can freely hand over an ephemeral, single-job directory it just
+  created. No existing test caught this because none of the 169 tests spin
+  up a real Docker container against a real host filesystem; this class of
+  bug only shows up under an actual root-vs-non-root UID mismatch, which
+  only a real deployment has.
+
 ## [2.3.1] - 2026-09-22
 
 ### Fixed

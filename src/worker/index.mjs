@@ -380,6 +380,24 @@ if (isWorkspaceMonorepo) {
 
 const { uid, gid } = resolveBuildContainerIds();
 
+// This worker runs as root (Docker-outside-of-Docker needs the socket), so
+// everything staged above (mkdirSync/cpSync) is root-owned on the real host
+// filesystem — but the build container below runs as `uid:gid` (a non-root
+// user, deliberately, so a compromised build can't do much). Without this,
+// the container's very first write into the bind-mounted job dir (`npm
+// install` creating node_modules, Gradle creating its cache under
+// GRADLE_USER_HOME, etc.) fails with EACCES: root's default directory mode
+// grants other users read+traverse but not write. Root can freely hand this
+// ephemeral, single-job directory over to another UID before that happens.
+log("=== Fixing job directory ownership for the build container ===");
+try {
+  execFileSync("chown", ["-R", `${uid}:${gid}`, jobDir], { stdio: "pipe" });
+  log(`${jobDir} is now owned by ${uid}:${gid}.`);
+} catch (error) {
+  logError(`Warning: couldn't chown ${jobDir} to ${uid}:${gid} (${error.message}) — the build below may fail with a permission error.`);
+}
+log("");
+
 const gradleTask =
   job.build.artifact === "aab"
     ? "bundle"
