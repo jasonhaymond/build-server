@@ -36,6 +36,20 @@ echo "== Snapshotting database and .env before update =="
 # runs non-interactively.
 docker compose exec -T api node scripts/backup.mjs
 
+# web/config.js is gitignored (a per-deployment file, like .env) — but if
+# an upstream commit ever *removes a path from tracking* (exactly what
+# happened once already: web/config.js moving from tracked to gitignored
+# in v2.2.0), a clean pull deletes that file from the working tree too,
+# same as any other tracked-file deletion. There's no "uncommitted
+# changes" guard against that — the copy was clean, so nothing looked
+# dirty. Back it up and restore it if the pull wipes it, so this class of
+# bug can't silently break the web UI (a missing config.js makes it fail
+# to load at all — a blank page, no visible error) again.
+WEB_CONFIG_BACKUP=""
+if [[ -f web/config.js ]]; then
+  WEB_CONFIG_BACKUP="$(cat web/config.js)"
+fi
+
 if [[ -n "$TARGET_REF" ]]; then
   echo "== Fetching and checking out $TARGET_REF =="
   git fetch --tags
@@ -43,6 +57,11 @@ if [[ -n "$TARGET_REF" ]]; then
 else
   echo "== Pulling latest on the current branch =="
   git pull
+fi
+
+if [[ -n "$WEB_CONFIG_BACKUP" && ! -f web/config.js ]]; then
+  echo "== Restoring web/config.js (removed from tracking by this update) =="
+  printf '%s\n' "$WEB_CONFIG_BACKUP" > web/config.js
 fi
 
 ANDROID_IMAGE="$(grep -E '^ANDROID_BUILD_IMAGE=' .env | cut -d= -f2-)"

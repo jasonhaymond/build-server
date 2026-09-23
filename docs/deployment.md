@@ -537,6 +537,21 @@ you're on a deployment from before it became gitignored — `git rm
 it's already in `.gitignore` going forward) and the update will stop
 tripping on it for good.
 
+**The web UI loads a blank/black page after an update, with nothing in
+the browser console explaining why** — `web/config.js` (gitignored, a
+per-deployment file) went missing. This actually happened once: pulling
+the commit that moved it from tracked to gitignored *deleted* it from a
+clean working tree, the same as pulling any other tracked-file removal
+would — there's no warning, since a clean deletion during a fast-forward
+merge doesn't trip the uncommitted-changes guard at all. Since `2.3.3`,
+`scripts/update.sh` backs this file up before pulling and restores it
+automatically if the pull removes it, so this specific failure shouldn't
+recur — but if you're recovering from it right now (or updating from
+before `2.3.3`), just recreate it: `cp web/config.example.js
+web/config.js`, then set `API_BASE_URL` to match `PUBLIC_BASE_URL`
+exactly. It's bind-mounted, so this takes effect on the next page load —
+no rebuild or restart needed.
+
 **`node scripts/backup.mjs` fails with `Cannot find package
 'better-sqlite3'`** — it was run bare on the host instead of inside the
 `api` container. The host is never expected to have `node_modules`

@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.3.3] - 2026-09-22
+
+### Fixed
+
+- Updating past `2.2.0` could silently delete `web/config.js` (the
+  gitignored, per-deployment API origin file), breaking the web UI
+  entirely — a blank/black page with no console error, since the whole
+  JS module graph fails to load without it. This actually happened on a
+  real deployment: pulling the commit that moved `web/config.js` from
+  tracked to gitignored *deleted* a clean local copy the same way pulling
+  any other tracked-file removal would, and nothing about that trips
+  `scripts/update.sh`'s uncommitted-changes guard — a clean deletion via
+  fast-forward merge isn't "dirty." `scripts/update.sh` now backs the
+  file up before pulling and restores it automatically if the pull
+  removes it — verified directly (a clean file that goes missing gets
+  restored exactly; a file that survives isn't touched or duplicated; no
+  file existing beforehand stays that way, no crash). See
+  `docs/deployment.md`'s Troubleshooting section for recovering an
+  already-broken deployment.
+
 ## [2.3.2] - 2026-09-22
 
 ### Fixed
