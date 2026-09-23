@@ -398,6 +398,20 @@ try {
 }
 log("");
 
+// A debug build ships unstripped native libraries (React Native/Hermes/every native
+// module's .so files, all with debug symbols) for every ABI Gradle is told to build —
+// by default all four (armeabi-v7a, arm64-v8a, x86, x86_64), each a full unstripped copy.
+// That's what actually explains a 150-200MB+ debug APK for a fairly ordinary app, far more
+// than the JS bundle or a release build's size would suggest. arm64-v8a alone covers the
+// overwhelming majority of real Android hardware since well before this build-server
+// existed, and this project's whole purpose is a real-device internal-distribution
+// install, not an x86 emulator — so debug builds default to it alone, cutting the
+// unnecessary ABI copies. Override with `build.env.ANDROID_ABI` (e.g. "x86_64" to install
+// on an emulator instead) when that default doesn't fit. Doesn't apply to a future signed
+// release/AAB build, where Google Play's own per-device delivery should decide this
+// instead of a single hardcoded ABI.
+const androidAbi = job.build.env?.ANDROID_ABI ?? "arm64-v8a";
+
 const gradleTask =
   job.build.artifact === "aab"
     ? "bundle"
@@ -496,9 +510,10 @@ printf '\n%s\n' \
 
 echo
 echo "=== Building Android artifact ==="
+${job.build.variant === "debug" ? `echo "Restricting native libraries to ${androidAbi} (override with build.env.ANDROID_ABI) to avoid an unnecessarily bloated debug APK."` : ""}
 cd android
 
-./gradlew ${gradleTask}${gradleVariant} --stacktrace
+./gradlew ${gradleTask}${gradleVariant} --stacktrace${job.build.variant === "debug" ? ` -PreactNativeArchitectures=${androidAbi}` : ""}
 
 echo
 echo "=== Verifying artifact ==="

@@ -337,6 +337,14 @@ Scope: `build:create`.
   encrypted at rest while queued and masked (`***`) everywhere else —
   logs, persisted job records, API responses — the instant the build
   starts.
+- `build.env.ANDROID_ABI` (optional, `debug` variant only): which native
+  ABI to build for — default `arm64-v8a`, covering essentially all real
+  Android hardware. A debug build ships unstripped native libraries per
+  ABI it's told to target (Gradle's own default is all four —
+  `armeabi-v7a`, `arm64-v8a`, `x86`, `x86_64` — with no per-device
+  splitting), which is what actually makes an unrestricted debug APK
+  huge, not the JS bundle. Set this to `x86_64` to install on an Android
+  Studio emulator instead of a real device.
 
 Returns `202`:
 

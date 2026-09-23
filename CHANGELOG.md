@@ -5,6 +5,27 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.3.6] - 2026-09-22
+
+### Fixed
+
+- **Debug APKs were needlessly huge** (191MB for an ordinary-sized app). A
+  debug build packages unstripped native libraries — React Native,
+  Hermes, and every native module's `.so` files, each with debug symbols
+  — for every ABI Gradle is told to target, and the default is all four
+  (`armeabi-v7a`, `arm64-v8a`, `x86`, `x86_64`) with no per-device
+  splitting the way a real release build or Play Store delivery would do.
+  That, not the JS bundle, is what actually explains the size. `arm64-v8a`
+  alone covers the overwhelming majority of real Android hardware and is
+  exactly this project's use case (installing on a real device, not an
+  x86 emulator), so debug builds now pass
+  `-PreactNativeArchitectures=arm64-v8a` to Gradle by default — override
+  with `build.env.ANDROID_ABI` (e.g. `x86_64` for an emulator) when that
+  default doesn't fit. Doesn't apply to a future signed release/AAB
+  build, where per-device delivery should make this decision instead of
+  a single hardcoded ABI. Found on Clocker's first real installable
+  build, immediately after `2.3.4` got the app actually running.
+
 ## [2.3.5] - 2026-09-22
 
 ### Fixed
