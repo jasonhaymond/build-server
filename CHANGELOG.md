@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- Shell scripts (`scripts/update.sh`) are now executable in git. They were committed from
+  Windows, which doesn't record the executable bit, so running them directly
+  (`./script.sh`) failed with "Permission denied" — only `bash script.sh` worked.
+
 ## [2.4.0] - 2026-09-23
 
 ### Added
