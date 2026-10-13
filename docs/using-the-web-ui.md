@@ -31,6 +31,9 @@ Username and password, then a 6-digit code from your authenticator app
 enrolling — see Profile below). If sign-in fails, the error is specific:
 wrong username/password, or an invalid/expired code.
 
+You stay signed in for 180 days on that browser (unless you sign out,
+or the administrator changes `SESSION_TTL_HOURS`).
+
 There's no "API base URL" field to fill in anymore — the web UI already
 knows where its API is (set once by whoever deployed it).
 
@@ -101,6 +104,11 @@ Shows the build's status, platform/variant/artifact, timestamps, and:
   signing in to use — you can share it with anyone who needs the file
   (that's intentional; treat the link itself as a credential, since
   anyone who has it can download the artifact).
+  Only the **two newest completed builds of each project** keep their
+  download — when a newer build of the same project completes, the
+  oldest one's file is deleted automatically and its link stops working.
+  The build itself, and its log, stay in your history; its Artifacts
+  section just says the file was removed by cleanup.
 - **Logs** — the build's real output. If a build fails, this is where to
   look — the failure reason shown above the log is a short summary, the
   log itself has the detail.

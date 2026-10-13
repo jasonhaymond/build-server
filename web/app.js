@@ -331,7 +331,9 @@ async function renderBuildDetail(id) {
         <div class="card">
           <h3>Artifacts</h3>
           ${artifactsResp.artifacts.length === 0
-            ? `<p class="muted">No artifacts yet.</p>`
+            ? `<p class="muted">${build.status === "completed"
+                ? "Artifact removed by automatic cleanup — only the newest builds of each project keep their download."
+                : "No artifacts yet."}</p>`
             : `<ul>${artifactsResp.artifacts.map((a) => `
                 <li><a href="${a.downloadUrl}">${escapeHtml(a.filename)}</a>
                   <span class="muted">(${(a.size / (1024 * 1024)).toFixed(1)} MB)</span></li>

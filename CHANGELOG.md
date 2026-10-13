@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-10-13
+
+### Added
+
+- **Automatic build cleanup.** After every build finishes (and once when
+  the API starts), each finished build's staged source and `work/`
+  directory — `node_modules`, the Gradle cache, gigabytes per build — is
+  deleted, and only the newest 2 completed builds of each project keep
+  their downloadable artifact (configurable with
+  `KEEP_ARTIFACTS_PER_PROJECT`). Retention is counted per owner, per
+  project name, per platform, so one user's builds never evict another's.
+  Older artifacts are deleted and their download links disabled. Build
+  rows, logs and `job.json` are kept, so the full history stays in the web
+  UI; a cleaned-up build's Artifacts section says the file was removed by
+  cleanup instead of "No artifacts yet." `scripts/cleanup.mjs` /
+  `RETENTION_DAYS` is unchanged and still optional.
+
+### Changed
+
+- **Web UI sign-in now lasts 180 days** instead of 12 hours
+  (`SESSION_TTL_HOURS` default is now `4320`). An existing deployment
+  whose `.env` sets `SESSION_TTL_HOURS=12` explicitly keeps the old
+  value until that line is changed or removed. Sessions issued before
+  the update keep their original expiry.
+
 ### Fixed
 
 - Shell scripts (`scripts/update.sh`) are now executable in git. They were committed from

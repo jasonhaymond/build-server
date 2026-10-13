@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { updateBuild } from "../db/database.mjs";
 import { createLogger } from "../logging/logger.mjs";
+import { pruneBuildDataSafely } from "../system/prune.mjs";
 import { serializeJobMasked } from "./jobPayload.mjs";
 
 const logger = createLogger("queue");
@@ -102,6 +103,8 @@ export function processQueue() {
       failureReason: error.message,
     });
 
+    pruneBuildDataSafely();
+
     queueState.activeBuild = false;
     processQueue();
   });
@@ -149,6 +152,8 @@ export function processQueue() {
 
       logger.error("Build failed", { id, exitCode, durationMs });
     }
+
+    pruneBuildDataSafely();
 
     queueState.activeBuild = false;
     processQueue();

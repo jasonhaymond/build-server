@@ -65,6 +65,7 @@ import { createLogger } from "../logging/logger.mjs";
 import { serializeJobForQueue } from "../queue/jobPayload.mjs";
 import { cancelQueuedBuild, processQueue, queueState } from "../queue/queue.mjs";
 import { reconstructQueueOnStartup } from "../queue/recovery.mjs";
+import { pruneBuildDataSafely } from "../system/prune.mjs";
 import {
   buildClearedSessionCookie,
   buildSessionCookie,
@@ -117,7 +118,7 @@ try {
 // http://localhost dev, where a browser silently refuses to store a
 // Secure cookie at all.
 const cookieSecure = process.env.COOKIE_SECURE !== "false";
-const sessionTtlHours = Number(process.env.SESSION_TTL_HOURS ?? 12);
+const sessionTtlHours = Number(process.env.SESSION_TTL_HOURS ?? 4320);
 
 // Derived from the existing secrets key rather than provisioning a second
 // one — only used to HMAC-sign the stateless, no-DB-row request-access
@@ -1481,6 +1482,7 @@ const isMainModule = import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMainModule) {
   upsertAppMeta(appVersion);
   reconstructQueueOnStartup();
+  pruneBuildDataSafely();
 
   app.listen(port, () => {
     logger.info("Build API listening", { port, version: appVersion });

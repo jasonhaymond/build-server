@@ -8,6 +8,7 @@ import {
   updateBuild,
 } from "../db/database.mjs";
 import { createLogger } from "../logging/logger.mjs";
+import { pruneBuildDataSafely } from "../system/prune.mjs";
 import { deserializeJobFromQueue } from "./jobPayload.mjs";
 import { processQueue, queueState } from "./queue.mjs";
 
@@ -88,6 +89,8 @@ function reattachBuildingBuild(row) {
       logger.error("Reattached build failed", { id: row.id, exitCode, durationMs });
     }
 
+    pruneBuildDataSafely();
+
     queueState.activeBuild = false;
     processQueue();
   });
@@ -95,6 +98,7 @@ function reattachBuildingBuild(row) {
   wait.on("error", (error) => {
     logger.error("Lost track of reattached build", { id: row.id, error: error.message });
     markInterrupted(row.id, `Lost track of build after restart: ${error.message}`);
+    pruneBuildDataSafely();
     queueState.activeBuild = false;
     processQueue();
   });

@@ -760,6 +760,32 @@ export function getCleanableBuilds(cutoffIso) {
   `).all(cutoffIso);
 }
 
+// Every terminal build, flagged with whether it's among the newest
+// `keepPerGroup` completed builds of its group. A group is one owner's
+// project on one platform — another user's same-named project never
+// evicts yours, and an iOS build never evicts the Android ones.
+export function getPrunableBuilds(keepPerGroup) {
+  return db.prepare(`
+    WITH ranked AS (
+      SELECT
+        id,
+        status,
+        ROW_NUMBER() OVER (
+          PARTITION BY COALESCE('u' || user_id, 'k' || api_key_id, ''), project_name, platform
+          ORDER BY completed_at DESC
+        ) AS completed_rank
+      FROM builds
+      WHERE status = 'completed'
+    )
+    SELECT
+      b.id AS id,
+      CASE WHEN r.completed_rank <= @keepPerGroup THEN 1 ELSE 0 END AS keepArtifacts
+    FROM builds b
+    LEFT JOIN ranked r ON r.id = b.id
+    WHERE b.status IN ('completed', 'failed', 'cancelled')
+  `).all({ keepPerGroup });
+}
+
 export function disableArtifactsForBuild(buildId) {
   db.prepare(`UPDATE artifacts SET enabled = 0 WHERE build_id = ?`).run(buildId);
   db.prepare(`UPDATE artifact_download_tokens SET enabled = 0 WHERE build_id = ?`).run(buildId);
