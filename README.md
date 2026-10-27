@@ -9,7 +9,7 @@ It accepts Android/Expo/React Native source and build configuration,
 builds it in an isolated Docker container, stores the resulting APK/AAB,
 and returns a permanent public download URL.
 
-**Current version:** 2.5.0 — see [CHANGELOG.md](CHANGELOG.md) for release history.
+**Current version:** 2.6.0 (builds and the API on Node.js 24) — see [CHANGELOG.md](CHANGELOG.md) for release history.
 
 Architecture rationale, the source/build request schema, and the security
 model live in [PROJECT-SCOPE.md](PROJECT-SCOPE.md) (the original handoff
@@ -21,7 +21,7 @@ see [docs/api-reference.md](docs/api-reference.md). See
 ## Requirements
 
 - Docker (runs both the API and the isolated Android build containers)
-- Node.js 20+ (only needed to run the API outside of Docker Compose)
+- Node.js 22+ — 24 (the current LTS) recommended (only needed to run the API outside of Docker Compose; the images use Node 24 since 2.6.0)
 
 ## Setup (Docker Compose — recommended)
 

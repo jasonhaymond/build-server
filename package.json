@@ -1,6 +1,6 @@
 {
   "name": "build-server",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,7 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "better-sqlite3": "^12.11.1",
+    "better-sqlite3": "^13.0.3",
     "express": "^5.2.1",
     "qrcode": "^1.5.4",
     "yauzl": "^3.4.0"

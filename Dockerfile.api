@@ -2,9 +2,11 @@
 # (plus the compose plugin, used by the update-trigger's sibling-container
 # invocation of scripts/update.sh) to talk to the host daemon over a
 # mounted socket, not a full Docker install.
-FROM docker:27-cli AS docker-cli
+# 29: the same major version as the host's Docker daemon (29.9 on apps).
+FROM docker:29-cli AS docker-cli
 
-FROM node:20-slim
+# Node.js 24, the current LTS (Node 20 reached its end of life in April 2026).
+FROM node:24-slim
 
 # git: needed for git-source builds and scripts/update.sh's git pull.
 # ca-certificates: HTTPS git clones/npm installs, and the update-checker's

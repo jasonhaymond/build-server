@@ -15,8 +15,10 @@ RUN apt-get update && apt-get install -y \
     openjdk-17-jdk \
     && rm -rf /var/lib/apt/lists/*
 
-# Node.js 20
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+# Node.js 24 (the current LTS). Expo SDK 58 / React Native 0.88 refuse to
+# build on anything older than Node 22.13; Node 20 is also past its end of
+# life (April 2026). Older Expo SDKs (54-57) build fine on 24 too.
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
     && apt-get update \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*

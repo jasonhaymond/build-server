@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-10-27
+
+### Changed
+
+- **Builds run on Node.js 24** (the current LTS) instead of Node 20, which
+  reached its end of life in April 2026. Expo SDK 58 / React Native 0.88
+  won't build on anything older than Node 22.13, so apps on SDK 58 need
+  this; apps on Expo SDK 54-57 build on Node 24 unchanged. Java 17 and the
+  Android SDK (platform 36, build-tools 36.0.0) are unchanged.
+- **The API runs on Node.js 24** (`node:24-slim`), with the Docker CLI and
+  compose plugin from `docker:29-cli` (matching the host's Docker 29).
+- `better-sqlite3` 13 (needs Node 22+; SQLite 3.53.4, prebuilt binaries via
+  N-API), plus patch updates of express, supertest and vitest.
+
+### Security
+
+- `body-parser` 2.4.0 (via express 5.3.0): fixes a denial of service from
+  trailing bytes after a compressed request body (GHSA-27r3-jxmh-p828).
+  Also fixes moderate advisories in `qs` and `@vitest/mocker` (test only).
+
 ## [2.5.0] - 2026-10-13
 
 ### Added
