@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-10-28
+
+### Added
+
+- **`build.env.ANDROID_ABI` works for release builds too.** A release build
+  stays every-ABI by default (right for a Google Play AAB), but can now be
+  limited to e.g. `arm64-v8a` for an APK installed directly on phones — a
+  release `arm64-v8a` APK is about a fifth of an all-ABI debug one (Homebase:
+  ~45 MB vs ~230 MB).
+
+### Security
+
+- `ANDROID_ABI` is now checked against the four real ABI names before it's
+  used — it's placed in the build's shell command, and previously any string
+  was passed through.
+
 ## [2.6.0] - 2026-10-27
 
 ### Changed

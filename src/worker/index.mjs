@@ -18,6 +18,7 @@ import { registerArtifact } from "./artifacts.mjs";
 import { resolveBuildContainerIds, resolveHostBuildDir } from "./docker.mjs";
 import { cloneGitSource } from "./gitClone.mjs";
 import { extractZipSafely } from "./zip.mjs";
+import { resolveAbi } from "./abi.mjs";
 
 const serverDir = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const buildsDir = resolve(serverDir, "builds");
@@ -407,10 +408,18 @@ log("");
 // existed, and this project's whole purpose is a real-device internal-distribution
 // install, not an x86 emulator — so debug builds default to it alone, cutting the
 // unnecessary ABI copies. Override with `build.env.ANDROID_ABI` (e.g. "x86_64" to install
-// on an emulator instead) when that default doesn't fit. Doesn't apply to a future signed
-// release/AAB build, where Google Play's own per-device delivery should decide this
-// instead of a single hardcoded ABI.
-const androidAbi = job.build.env?.ANDROID_ABI ?? "arm64-v8a";
+// on an emulator instead) when that default doesn't fit.
+//
+// Release builds (2.7.0) are unrestricted unless ANDROID_ABI is given — see ./abi.mjs,
+// which also refuses anything but real ABI names (the value goes into a shell command).
+let androidAbi;
+let restrictAbi;
+try {
+  ({ abi: androidAbi, restrict: restrictAbi } = resolveAbi(job.build.variant, job.build.env?.ANDROID_ABI));
+} catch (err) {
+  logError(err.message);
+  process.exit(1);
+}
 
 const gradleTask =
   job.build.artifact === "aab"
@@ -527,10 +536,10 @@ printf '\n%s\n' \
 
 echo
 echo "=== Building Android artifact ==="
-${job.build.variant === "debug" ? `echo "Restricting native libraries to ${androidAbi} (override with build.env.ANDROID_ABI) to avoid an unnecessarily bloated debug APK."` : ""}
+${restrictAbi ? `echo "Restricting native libraries to ${androidAbi} (build.env.ANDROID_ABI) to keep the APK small."` : ""}
 cd android
 
-./gradlew ${gradleTask}${gradleVariant} --stacktrace${job.build.variant === "debug" ? ` -PreactNativeArchitectures=${androidAbi}` : ""}
+./gradlew ${gradleTask}${gradleVariant} --stacktrace${restrictAbi ? ` -PreactNativeArchitectures=${androidAbi}` : ""}
 
 echo
 echo "=== Verifying artifact ==="

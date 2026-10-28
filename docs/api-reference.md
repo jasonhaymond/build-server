@@ -337,8 +337,13 @@ Scope: `build:create`.
   encrypted at rest while queued and masked (`***`) everywhere else —
   logs, persisted job records, API responses — the instant the build
   starts.
-- `build.env.ANDROID_ABI` (optional, `debug` variant only): which native
-  ABI to build for — default `arm64-v8a`, covering essentially all real
+- `build.env.ANDROID_ABI` (optional): which native ABI(s) to build for,
+  comma-separated from `armeabi-v7a`, `arm64-v8a`, `x86`, `x86_64` (anything
+  else fails the build). **Debug**: default `arm64-v8a`. **Release** (2.7.0):
+  every ABI unless this is given — set it for a release APK installed straight
+  onto known hardware (a Homebase release `arm64-v8a` APK is ~45 MB against
+  ~230 MB for a debug one with every ABI); leave it unset for an AAB, so Google
+  Play delivers per device. For debug, the default `arm64-v8a` covers essentially all real
   Android hardware. A debug build ships unstripped native libraries per
   ABI it's told to target (Gradle's own default is all four —
   `armeabi-v7a`, `arm64-v8a`, `x86`, `x86_64` — with no per-device
