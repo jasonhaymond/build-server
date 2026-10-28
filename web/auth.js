@@ -445,6 +445,33 @@ export async function renderProfile() {
       </label>
       <div id="keysBody">Loading…</div>
     </div>
+
+    <div class="card">
+      <div class="spaced">
+        <h3>Android signing keys</h3>
+        <span>
+          <button id="genSigningBtn">Generate new key</button>
+          <button id="uploadSigningBtn">Upload existing key</button>
+        </span>
+      </div>
+      <p class="muted">
+        Signs your release builds so Android accepts them as updates to the same app. A build
+        uses one by adding <code>"signing": { "key": "&lt;name&gt;" }</code> to its <code>build</code>
+        section; API keys also need the <code>signing:use</code> scope. Only use a key for builds of
+        your own code — anything built with it can update your installed app.
+      </p>
+      <div id="signingError"></div>
+      <div id="signingResult"></div>
+      <div id="signingUpload" hidden>
+        <div class="field"><label for="upName">Name (lowercase, e.g. "clocker")</label><input id="upName" /></div>
+        <div class="field"><label for="upFile">Keystore file (.jks / .p12 / .keystore)</label><input id="upFile" type="file" /></div>
+        <div class="field"><label for="upAlias">Key alias</label><input id="upAlias" autocomplete="off" /></div>
+        <div class="field"><label for="upStorePw">Keystore password</label><input id="upStorePw" type="password" autocomplete="off" /></div>
+        <div class="field"><label for="upKeyPw">Key password</label><input id="upKeyPw" type="password" autocomplete="off" /></div>
+        <button class="primary" id="upSubmit">Upload</button>
+      </div>
+      <div id="signingBody">Loading…</div>
+    </div>
   `);
 
   document.getElementById("pwBtn").addEventListener("click", async () => {
@@ -593,4 +620,127 @@ export async function renderProfile() {
   });
 
   await loadKeys();
+
+  // ---- Android signing keys ----
+  const signingError = (message) => {
+    document.getElementById("signingError").innerHTML = message ? `<div class="error">${escapeHtml(message)}</div>` : "";
+  };
+
+  async function loadSigningKeys() {
+    const bodyEl = document.getElementById("signingBody");
+    try {
+      const { signingKeys } = await api.listMySigningKeys();
+      if (signingKeys.length === 0) {
+        bodyEl.innerHTML = `<p class="muted">No signing keys yet.</p>`;
+        return;
+      }
+      bodyEl.innerHTML = `<table>
+        <thead><tr><th>Name</th><th>Alias</th><th>Certificate SHA-256</th><th>Created</th><th></th></tr></thead>
+        <tbody>
+          ${signingKeys.map((k) => `
+            <tr>
+              <td>${escapeHtml(k.name)}</td>
+              <td class="muted">${escapeHtml(k.keyAlias)}</td>
+              <td class="muted"><code style="word-break: break-all;">${escapeHtml(k.certSha256)}</code></td>
+              <td class="muted">${escapeHtml(new Date(k.createdAt).toLocaleDateString())}</td>
+              <td><button class="danger" data-delete-signing="${k.id}" data-name="${escapeHtml(k.name)}">Delete</button></td>
+            </tr>`).join("")}
+        </tbody>
+      </table>`;
+      bodyEl.querySelectorAll("[data-delete-signing]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          // Deleting is irreversible for every app signed with this key — typed confirmation.
+          const typed = window.prompt(
+            `Delete signing key "${btn.dataset.name}"? Apps signed with it can never be updated by a new build unless you still have a backup of it. Type the key's name to confirm:`,
+          );
+          if (typed === null) return;
+          signingError("");
+          try {
+            await api.deleteSigningKey(btn.dataset.deleteSigning, typed);
+            await loadSigningKeys();
+          } catch (error) {
+            signingError(error.message);
+          }
+        });
+      });
+    } catch (error) {
+      signingError(error.message);
+    }
+  }
+
+  // Shows a newly generated key's backup exactly once: a keystore download plus its
+  // password, with a required "saved it" checkbox before the panel can be dismissed.
+  function showSigningBackup(result) {
+    const blob = new Blob([Uint8Array.from(atob(result.backup.keystoreBase64), (c) => c.charCodeAt(0))], { type: "application/x-pkcs12" });
+    const url = URL.createObjectURL(blob);
+    document.getElementById("signingResult").innerHTML = `
+      <div class="card">
+        <p><strong>Back up this key now — it won't be shown again.</strong> If build-server's data is
+        ever lost and you don't have this file and password, no future build can update apps already
+        installed with this key.</p>
+        <p><a id="signingDownload" href="${url}" download="${escapeHtml(result.backup.filename)}">Download ${escapeHtml(result.backup.filename)}</a></p>
+        <p class="muted">Alias: <code>${escapeHtml(result.keyAlias)}</code> · Password (store and key):</p>
+        <pre class="logs">${escapeHtml(result.backup.storePassword)}</pre>
+        <p class="muted">Certificate SHA-256: <code style="word-break: break-all;">${escapeHtml(result.certSha256)}</code></p>
+        <label class="row"><input type="checkbox" id="signingSaved" style="width: auto;" /> I've saved the file and password in my password manager</label>
+        <button id="signingDone" disabled>Done</button>
+      </div>`;
+    document.getElementById("signingSaved").addEventListener("change", (e) => {
+      document.getElementById("signingDone").disabled = !e.target.checked;
+    });
+    document.getElementById("signingDone").addEventListener("click", () => {
+      URL.revokeObjectURL(url);
+      document.getElementById("signingResult").innerHTML = "";
+    });
+  }
+
+  document.getElementById("genSigningBtn").addEventListener("click", async () => {
+    const name = window.prompt('Name for the new signing key (lowercase letters, digits, dashes — e.g. "clocker"):');
+    if (!name) return;
+    signingError("");
+    document.getElementById("signingResult").innerHTML = `<p class="muted">Generating (a few seconds)…</p>`;
+    try {
+      const result = await api.generateSigningKey(name.trim(), name.trim());
+      showSigningBackup(result);
+      await loadSigningKeys();
+    } catch (error) {
+      document.getElementById("signingResult").innerHTML = "";
+      signingError(error.message);
+    }
+  });
+
+  document.getElementById("uploadSigningBtn").addEventListener("click", () => {
+    const panel = document.getElementById("signingUpload");
+    panel.hidden = !panel.hidden;
+  });
+
+  document.getElementById("upSubmit").addEventListener("click", async () => {
+    signingError("");
+    const file = document.getElementById("upFile").files[0];
+    if (!file) {
+      signingError("Choose a keystore file first.");
+      return;
+    }
+    // Read the file as base64 for the JSON request (keystores are a few KB).
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let binary = "";
+    bytes.forEach((b) => { binary += String.fromCharCode(b); });
+    try {
+      await api.uploadSigningKey({
+        name: document.getElementById("upName").value.trim(),
+        keystoreBase64: btoa(binary),
+        keyAlias: document.getElementById("upAlias").value.trim(),
+        storePassword: document.getElementById("upStorePw").value,
+        keyPassword: document.getElementById("upKeyPw").value,
+      });
+      ["upName", "upAlias", "upStorePw", "upKeyPw"].forEach((id) => { document.getElementById(id).value = ""; });
+      document.getElementById("upFile").value = "";
+      document.getElementById("signingUpload").hidden = true;
+      await loadSigningKeys();
+    } catch (error) {
+      signingError(error.message);
+    }
+  });
+
+  await loadSigningKeys();
 }

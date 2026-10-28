@@ -1,6 +1,10 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 
 const ALGORITHM = "aes-256-gcm";
+// GCM's authentication tag is what detects tampering with stored ciphertext. Pinning its
+// length to the full 16 bytes on both sides means decryption refuses a shortened tag —
+// without it, Node would accept a truncated tag, which is much easier to forge.
+const AUTH_TAG_LENGTH = 16;
 
 function keyFromHex(keyHex) {
   if (!keyHex) {
@@ -23,7 +27,7 @@ function keyFromHex(keyHex) {
 export function encryptSecrets(secrets, keyHex) {
   const key = keyFromHex(keyHex);
   const iv = randomBytes(12);
-  const cipher = createCipheriv(ALGORITHM, key, iv);
+  const cipher = createCipheriv(ALGORITHM, key, iv, { authTagLength: AUTH_TAG_LENGTH });
 
   const plaintext = Buffer.from(JSON.stringify(secrets ?? {}), "utf8");
   const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
@@ -45,6 +49,7 @@ export function decryptSecrets(payload, keyHex) {
     ALGORITHM,
     key,
     Buffer.from(payload.iv, "base64"),
+    { authTagLength: AUTH_TAG_LENGTH },
   );
 
   decipher.setAuthTag(Buffer.from(payload.authTag, "base64"));

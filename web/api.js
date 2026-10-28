@@ -121,6 +121,21 @@ export const api = {
   revokeMyApiKey: (id) => request(`/api/v1/api-keys/${id}`, { method: "DELETE" }),
   deleteMyApiKey: (id) => request(`/api/v1/api-keys/${id}/purge`, { method: "DELETE" }),
 
+  // Android signing keys (session-only — see src/api/server.mjs's signing-key routes).
+  listMySigningKeys: () => request("/api/v1/signing-keys"),
+  generateSigningKey: (name, commonName) => request("/api/v1/signing-keys", {
+    method: "POST",
+    body: JSON.stringify({ name, mode: "generate", commonName }),
+  }),
+  uploadSigningKey: ({ name, keystoreBase64, storePassword, keyAlias, keyPassword }) => request("/api/v1/signing-keys", {
+    method: "POST",
+    body: JSON.stringify({ name, mode: "upload", keystoreBase64, storePassword, keyAlias, keyPassword }),
+  }),
+  deleteSigningKey: (id, confirmName) => request(`/api/v1/signing-keys/${id}`, {
+    method: "DELETE",
+    body: JSON.stringify({ confirmName }),
+  }),
+
   // --- System (admin) ---
   getSystemStatus: () => request("/api/v1/system"),
   getMetrics: () => request("/api/v1/metrics"),

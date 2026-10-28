@@ -142,6 +142,23 @@ Your own account settings:
   a full walkthrough of wiring a project's CI/deploy pipeline to trigger
   builds here with a key like this, or
   [api-reference.md](api-reference.md) for the raw endpoint reference.
+- **Android signing keys** — keys that sign your release builds, so Android
+  accepts each new APK as an update to the app already installed (every build
+  signed with the shared debug key otherwise).
+  1. Click **Generate new key**, enter a name (lowercase, e.g. `clocker`).
+  2. A panel shows a **Download clocker.p12** link, the key's password, and its
+     certificate SHA-256. **This is the only time they're shown.** Download the
+     file and save it plus the password in your password manager — if this
+     server's data is ever lost and you don't have that backup, no future build
+     can update apps installed with this key.
+  3. Tick **I've saved the file and password…**, then **Done**.
+  4. Builds use it by adding `"signing": { "key": "clocker" }` to the `build`
+     section of the request; an API key also needs the `signing:use` scope (keys
+     created with full access already have it).
+  **Upload existing key** takes a `.jks`/`.p12` keystore with its alias and
+  passwords instead (checked before it's saved). **Delete** asks you to type the
+  key's name — it's permanent. Only use a key for builds of your own code: the
+  code being built can read the key while it builds.
 
 ## Admin page
 

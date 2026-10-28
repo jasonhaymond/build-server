@@ -69,6 +69,7 @@ Only relevant to a Bearer API key — a session isn't scope-narrowed.
 | `artifact:download` | `GET /api/v1/builds/:id/artifacts`, `GET /api/v1/builds/:id/artifacts/:filename` |
 | `artifact:manage` | `DELETE /api/v1/builds/:id/artifacts/:filename/download-token` |
 | `metrics:read` | `GET /api/v1/metrics` |
+| `signing:use` | `build.signing` on `POST /api/v1/builds` — signing a release with one of the key owner's signing keys (in addition to `build:create`) |
 
 `GET /api/v1/whoami` requires a valid session or key but no particular
 scope — it's what the web UI uses to verify/restore sign-in without
@@ -337,6 +338,13 @@ Scope: `build:create`.
   encrypted at rest while queued and masked (`***`) everywhere else —
   logs, persisted job records, API responses — the instant the build
   starts.
+- `build.signing` (optional, **release builds only**): `{ "key": "<name>" }` —
+  sign the artifact with one of your own [signing keys](#signing-keys-session-only)
+  instead of the shared debug key. Needs a signed-in session, or an API key that
+  belongs to your account and has the `signing:use` scope. The worker verifies the
+  finished APK/AAB carries that key's certificate and fails the build otherwise.
+  `400` for a debug build, a standalone (user-less) API key, or a name you don't
+  have; `403` for a key without `signing:use`.
 - `build.env.ANDROID_ABI` (optional): which native ABI(s) to build for,
   comma-separated from `armeabi-v7a`, `arm64-v8a`, `x86`, `x86_64` (anything
   else fails the build). **Debug**: default `arm64-v8a`. **Release** (2.7.0):
@@ -547,6 +555,55 @@ Permanently deletes an already-revoked key's row. `409` if the key is
 still active (revoke it first — `DELETE /api/v1/api-keys/:id` above);
 `404` if it doesn't exist or belongs to a different account. `204` on
 success.
+
+## Signing keys (session only)
+
+Android signing keys for `build.signing`. Like API keys, every route here needs a
+signed-in session (never a Bearer key) and only ever sees the signed-in user's own
+keys. The keystore and its passwords are stored encrypted (AES-256-GCM with
+`JOB_SECRETS_ENCRYPTION_KEY`) and are **never returned** — except once, in the
+response that generates a key, for your offline backup.
+
+### `POST /api/v1/signing-keys`
+
+Generate a new key (4096-bit RSA, PKCS12, ~27-year validity, random password):
+
+```json
+{ "name": "clocker", "mode": "generate", "commonName": "Clocker" }
+
+→ 201 { "id": 3, "name": "clocker", "keyAlias": "clocker", "storeType": "pkcs12",
+        "certSha256": "FA:C6:…", "createdAt": "…",
+        "backup": { "filename": "clocker.p12", "keystoreBase64": "…",
+                    "storePassword": "…", "keyPassword": "…" } }
+```
+
+Or upload an existing keystore (JKS or PKCS12, up to 64 KB; checked with `keytool`
+before it's stored — no `backup` in the response):
+
+```json
+{ "name": "clocker", "mode": "upload", "keystoreBase64": "…",
+  "storePassword": "…", "keyAlias": "upload", "keyPassword": "…" }
+```
+
+`name`: 1–64 lowercase letters, digits or dashes. `400` invalid input / wrong
+password or alias, `409` name already used, `429` more than 10 requests an hour.
+
+### `GET /api/v1/signing-keys`
+
+```json
+→ 200 { "signingKeys": [ { "id": 3, "name": "clocker", "keyAlias": "clocker",
+        "storeType": "pkcs12", "certSha256": "FA:C6:…", "createdAt": "…" } ] }
+```
+
+### `DELETE /api/v1/signing-keys/:id`
+
+```json
+{ "confirmName": "clocker" }   → 200 { "id": 3, "deleted": true }
+```
+
+Irreversible: apps installed with this key can't be updated by future builds unless
+you still have its backup. `confirmName` must match the key's name (`400`
+otherwise); `404` for a key that isn't yours.
 
 ## Metrics & system (admin)
 

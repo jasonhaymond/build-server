@@ -24,6 +24,15 @@ describe("encryptSecrets / decryptSecrets", () => {
     expect(() => encryptSecrets({}, "too-short")).toThrow(/32-byte/);
     expect(() => encryptSecrets({}, undefined)).toThrow(/not set/);
   });
+
+  // Tamper detection: a stored blob whose authentication tag has been cut short (easier to
+  // forge than a full 16-byte tag) must be refused, not accepted with weaker protection.
+  it("refuses a truncated authentication tag", () => {
+    const encrypted = encryptSecrets({ FOO: "bar" }, key);
+    const shortTag = Buffer.from(encrypted.authTag, "base64").subarray(0, 4).toString("base64");
+
+    expect(() => decryptSecrets({ ...encrypted, authTag: shortTag }, key)).toThrow();
+  });
 });
 
 describe("maskSecretsObject", () => {

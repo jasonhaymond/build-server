@@ -17,6 +17,10 @@ export const KNOWN_SCOPES = [
   "artifact:download",
   "artifact:manage",
   "metrics:read",
+  // Lets a key's builds be signed with one of its owner's signing keys (build.signing).
+  // Separate from build:create on purpose: a leaked key that can only build can't get
+  // arbitrary code signed as one of your apps.
+  "signing:use",
 ];
 
 export function parseScopes(scopesColumn) {

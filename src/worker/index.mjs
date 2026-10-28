@@ -19,6 +19,9 @@ import { resolveBuildContainerIds, resolveHostBuildDir } from "./docker.mjs";
 import { cloneGitSource } from "./gitClone.mjs";
 import { extractZipSafely } from "./zip.mjs";
 import { resolveAbi } from "./abi.mjs";
+import { getSigningKeyWithSecretById } from "../db/database.mjs";
+import { decryptSigningMaterial } from "../security/signingKeys.mjs";
+import { toJavaPropertiesValue } from "./javaProperties.mjs";
 
 const serverDir = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const buildsDir = resolve(serverDir, "builds");
@@ -390,6 +393,57 @@ const { uid, gid } = resolveBuildContainerIds();
 // GRADLE_USER_HOME, etc.) fails with EACCES: root's default directory mode
 // grants other users read+traverse but not write. Root can freely hand this
 // ephemeral, single-job directory over to another UID before that happens.
+/*
+ * ------------------------------------------------------------
+ * Release signing (build.signing — see src/security/signingKeys.mjs)
+ * ------------------------------------------------------------
+ *
+ * The API already checked the submitter may use this key and put only its id, owner and
+ * certificate fingerprint into the job. Here the worker re-checks all three against the
+ * database (the key could have been deleted or replaced while the build was queued),
+ * decrypts the keystore, and writes it plus its passwords into job-dir/signing/ as
+ * private files (0700 dir, 0600 files) — mounted into the build container at
+ * /build/job/signing and read by the Gradle snippet added in the container script below.
+ * Never in an environment variable or on a command line, where other processes on the
+ * host could read them, and never in a log. The directory is deleted the moment the
+ * build container exits, whatever the outcome (the exit handler below), so the key
+ * doesn't sit on disk with the build's other files.
+ */
+const signing = job.build.signing;
+const signingDir = resolve(jobDir, "signing");
+if (signing) {
+  process.on("exit", () => rmSync(signingDir, { recursive: true, force: true }));
+  const stored = getSigningKeyWithSecretById(signing.keyId);
+  if (!stored || stored.userId !== signing.ownerUserId || stored.certSha256 !== signing.certSha256) {
+    logError("Signing key is no longer available to this build (deleted or changed since it was queued).");
+    process.exit(1);
+  }
+  let material;
+  try {
+    material = decryptSigningMaterial(stored.secretPayload, process.env.JOB_SECRETS_ENCRYPTION_KEY);
+  } catch {
+    logError("Couldn't decrypt the signing key (JOB_SECRETS_ENCRYPTION_KEY changed?).");
+    process.exit(1);
+  }
+  mkdirSync(signingDir, { recursive: true, mode: 0o700 });
+  writeFileSync(resolve(signingDir, "upload.keystore"), material.keystore, { mode: 0o600 });
+  writeFileSync(
+    resolve(signingDir, "signing.properties"),
+    [
+      `storeFile=${toJavaPropertiesValue("/build/job/signing/upload.keystore")}`,
+      `storePassword=${toJavaPropertiesValue(material.storePassword)}`,
+      `keyAlias=${toJavaPropertiesValue(stored.keyAlias)}`,
+      `keyPassword=${toJavaPropertiesValue(material.keyPassword)}`,
+      `storeType=${toJavaPropertiesValue(stored.storeType)}`,
+      "",
+    ].join("\n"),
+    { mode: 0o600 },
+  );
+  log(`=== Release signing ===`);
+  log(`Signing with key "${stored.name}" (certificate SHA-256 ${stored.certSha256}).`);
+  log("");
+}
+
 log("=== Fixing job directory ownership for the build container ===");
 try {
   execFileSync("chown", ["-R", `${uid}:${gid}`, jobDir], { stdio: "pipe" });
@@ -506,9 +560,9 @@ echo "=== Enabling JS bundling for the debug build ==="
 # packaged into the APK at all, on the assumption a debug build always has
 # a Metro dev server to fetch JS from at runtime. That's true on a dev
 # machine, but never true for an APK downloaded and installed standalone
-# on someone's phone (this build-server's entire reason to exist, since it
-# has no release-signing support to produce a real release build instead)
-# — installing one produces exactly the "Unable to load script... Make
+# on someone's phone (this build-server's entire reason to exist; release
+# builds don't have this problem, and can be signed with a stored key via
+# build.signing) — installing one produces exactly the "Unable to load script... Make
 # sure you're running Metro" crash, every time, with no JS ever bundled.
 # A second react { } block (Gradle merges same-named extension blocks) is
 # simpler and more robust than trying to edit Expo's generated block in
@@ -519,6 +573,41 @@ react {
     debuggableVariants = []
 }
 GRADLE_EOF
+`
+    : ""
+}
+${
+  signing
+    ? `
+echo
+echo "=== Configuring release signing ==="
+# Adds a signing config that reads the owner's key from the private file the worker wrote
+# (/build/job/signing — values never appear in this script, the logs, or the environment)
+# and makes it the release build's signing config. A second android { } block appended at
+# the end of the file is merged by Gradle and, being evaluated last, overrides Expo's
+# default "sign release with the debug key" setting.
+cat >> android/app/build.gradle <<'GRADLE_EOF'
+
+def buildServerSigning = new Properties()
+file('/build/job/signing/signing.properties').withInputStream { buildServerSigning.load(it) }
+android {
+    signingConfigs {
+        buildServerRelease {
+            storeFile file(buildServerSigning['storeFile'])
+            storePassword buildServerSigning['storePassword']
+            keyAlias buildServerSigning['keyAlias']
+            keyPassword buildServerSigning['keyPassword']
+            storeType buildServerSigning['storeType']
+        }
+    }
+    buildTypes {
+        release {
+            signingConfig signingConfigs.buildServerRelease
+        }
+    }
+}
+GRADLE_EOF
+echo "Release builds will be signed with key \"${signing.name}\"."
 `
     : ""
 }
@@ -550,6 +639,37 @@ if [ ! -f "${artifactRelativePath}" ]; then
   exit 1
 fi
 
+${
+  signing
+    ? `
+echo
+echo "=== Verifying signature ==="
+# Confirms the artifact really is signed with the requested key: compares its certificate
+# fingerprint (lowercase hex, colons removed) against the one recorded for the key. A
+# mismatch fails the build rather than handing out an APK that won't update installs.
+# apksigner labels the line by signature scheme — "Signer #1 certificate SHA-256 digest:"
+# when the APK also has a v1 (JAR) signature, "V2 Signer: certificate SHA-256 digest:" when
+# it's v2-only (minSdk 24+) — so the sed pattern accepts any "…Signer… certificate SHA-256
+# digest: " prefix and takes the first.
+expected="$(echo '${signing.certSha256}' | tr -d ':' | tr 'A-F' 'a-f')"
+${
+  job.build.artifact === "apk"
+    ? `report="$("$(ls -d /opt/android-sdk/build-tools/* | sort -V | tail -1)/apksigner" verify --print-certs "${artifactRelativePath}" 2>&1 || true)"
+actual="$(printf '%s\n' "$report" | sed -n 's/^.*[Ss]igner.* certificate SHA-256 digest: //p' | head -1)"`
+    : `report="$(keytool -printcert -jarfile "${artifactRelativePath}" 2>&1 || true)"
+actual="$(printf '%s\n' "$report" | sed -n 's/^[[:space:]]*SHA256: //p' | head -1 | tr -d ':' | tr 'A-F' 'a-f')"`
+}
+if [ "$actual" != "$expected" ]; then
+  echo "ERROR: artifact is not signed with the requested key (got: \${actual:-none})."
+  # The verifier's own output (certificates are public — nothing secret here), to show why.
+  printf '%s\n' "$report" | head -20
+  ls -la "$(dirname "${artifactRelativePath}")"
+  exit 1
+fi
+echo "Signed with the requested key (SHA-256 $expected)."
+`
+    : ""
+}
 echo
 echo "=== BUILD COMPLETE ==="
 ls -lh "${artifactRelativePath}"
@@ -714,6 +834,12 @@ function runDocker() {
 }
 
 const { code: exitCode, timedOut } = await runDocker();
+
+// The build container is gone — remove the signing key files right away rather than
+// waiting for this process to exit or for build-data pruning (see the signing section).
+if (signing) {
+  rmSync(signingDir, { recursive: true, force: true });
+}
 
 if (exitCode !== 0) {
   log("");

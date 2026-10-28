@@ -851,3 +851,53 @@ export function listBuilds({ userId, apiKeyId, limit, offset }) {
     LIMIT ? OFFSET ?
   `).all(apiKeyId, limit, offset);
 }
+
+// ---- Signing keys (migration 0007; see src/security/signingKeys.mjs) -------------------
+// Every query below that a user can reach is scoped by user_id — a key is only ever
+// visible to, usable by, or deletable by its owner.
+
+// Stores a new key. `secretPayload` must already be encrypted (encryptSigningMaterial).
+// Throws on a duplicate (user_id, name) — the caller turns that into a 409.
+export function createSigningKey({ userId, name, keyAlias, storeType, certSha256, secretPayload, createdAt }) {
+  return db.prepare(`
+    INSERT INTO signing_keys (user_id, name, key_alias, store_type, cert_sha256, secret_payload, created_at)
+    VALUES (@userId, @name, @keyAlias, @storeType, @certSha256, @secretPayload, @createdAt)
+  `).run({ userId, name, keyAlias, storeType, certSha256, secretPayload, createdAt });
+}
+
+// The owner's keys, without the encrypted material (safe to send to the browser).
+export function listSigningKeysForUser(userId) {
+  return db.prepare(`
+    SELECT id, name, key_alias AS keyAlias, store_type AS storeType, cert_sha256 AS certSha256, created_at AS createdAt
+    FROM signing_keys
+    WHERE user_id = ?
+    ORDER BY name ASC
+  `).all(userId);
+}
+
+// One of this user's keys by name, without the encrypted material — used to validate a
+// build request. Returns undefined if the name doesn't exist *for this user*.
+export function getSigningKeyForUserByName(userId, name) {
+  return db.prepare(`
+    SELECT id, user_id AS userId, name, key_alias AS keyAlias, store_type AS storeType, cert_sha256 AS certSha256
+    FROM signing_keys
+    WHERE user_id = ? AND name = ?
+  `).get(userId, name);
+}
+
+// Full row including the encrypted material — worker only (it re-checks ownership).
+export function getSigningKeyWithSecretById(id) {
+  return db.prepare(`
+    SELECT id, user_id AS userId, name, key_alias AS keyAlias, store_type AS storeType,
+           cert_sha256 AS certSha256, secret_payload AS secretPayload
+    FROM signing_keys
+    WHERE id = ?
+  `).get(id);
+}
+
+// Deletes one of this user's keys. Returns the number of rows removed (0 = not found or
+// not theirs — the caller answers 404 either way).
+export function deleteSigningKeyForUser(userId, id) {
+  return db.prepare(`DELETE FROM signing_keys WHERE user_id = ? AND id = ?`).run(userId, id).changes;
+}
+

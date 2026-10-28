@@ -24,12 +24,14 @@ import {
   createRecoveryCodes,
   createSession,
   createSignupRequest,
+  createSigningKey,
   createUser,
   decideSignupRequest,
   deleteApiKey,
   deleteInvite,
   deleteRecoveryCodesForUser,
   deleteSessionByTokenHash,
+  deleteSigningKeyForUser,
   disableApiKey,
   disableArtifactDownloadTokenForArtifact,
   disableUserTotp,
@@ -44,6 +46,7 @@ import {
   getBuildMetrics,
   getSessionWithUser,
   getSignupRequestById,
+  getSigningKeyForUserByName,
   getTotalBuildCount,
   getUserById,
   getUserByUsername,
@@ -51,6 +54,7 @@ import {
   listBuilds,
   listInvites,
   listSignupRequests,
+  listSigningKeysForUser,
   listUnreadNotificationsForUser,
   listUsers,
   markInviteUsed,
@@ -75,6 +79,12 @@ import {
 import { hashPassword, MIN_PASSWORD_LENGTH, validatePasswordLength, verifyPassword } from "../security/passwords.mjs";
 import { checkAndConsume } from "../security/rateLimit.mjs";
 import { encryptSecrets } from "../security/secrets.mjs";
+import {
+  SIGNING_KEY_NAME_PATTERN,
+  encryptSigningMaterial,
+  generateSigningKeystore,
+  inspectUploadedKeystore,
+} from "../security/signingKeys.mjs";
 import { KNOWN_SCOPES, hasScope, parseScopes, serializeScopes } from "../security/scopes.mjs";
 import {
   buildOtpauthUri,
@@ -814,12 +824,47 @@ app.post("/api/v1/builds", requireScope("build:create"), (req, res) => {
     }
   }
 
+  // build.signing = { key: "<name>" } asks for the release artifact to be signed with one
+  // of the submitter's own signing keys (see src/security/signingKeys.mjs). Checked here
+  // so a bad request fails immediately instead of after a long build:
+  //   - release builds only (a debug build is always signed with the debug key);
+  //   - only a user's own keys: a standalone API key (no owning user) can't use any;
+  //   - an API key additionally needs the signing:use scope, so a leaked build-only key
+  //     can't get arbitrary code signed as one of your apps;
+  //   - an unknown name is a 400 that doesn't reveal other users' key names.
+  // The worker gets only the key's id/owner/fingerprint (re-checked at build time), never
+  // the key itself — it decrypts that from the database when it runs.
+  let resolvedSigning;
+  if (job.build?.signing !== undefined) {
+    const signing = job.build.signing;
+    if (!signing || typeof signing !== "object" || Array.isArray(signing) || typeof signing.key !== "string") {
+      return res.status(400).json({ error: 'build.signing must be { "key": "<signing key name>" }.' });
+    }
+    if (job.build?.variant !== "release") {
+      return res.status(400).json({ error: "build.signing is only supported for release builds." });
+    }
+    if (!req.user) {
+      return res.status(400).json({ error: "Signing keys belong to user accounts — submit with an API key created from your profile, or while signed in." });
+    }
+    if (!hasEffectiveScope(req, "signing:use")) {
+      return res.status(403).json({ error: "API key missing required scope: signing:use" });
+    }
+    const key = getSigningKeyForUserByName(req.user.id, signing.key);
+    if (!key) {
+      return res.status(400).json({ error: `No signing key named "${String(signing.key).slice(0, 64)}" in your account.` });
+    }
+    resolvedSigning = { keyId: key.id, name: key.name, ownerUserId: req.user.id, certSha256: key.certSha256 };
+  }
+
   const id = createBuildId();
   const submittedAt = new Date().toISOString();
 
   const workerJob = {
     ...job,
     id,
+    // Always the server-resolved form (or nothing) — whatever the client sent under
+    // build.signing never reaches the worker as-is.
+    build: job.build ? { ...job.build, signing: resolvedSigning } : job.build,
   };
 
   const build = {
@@ -1109,6 +1154,126 @@ app.delete("/api/v1/api-keys/:id/purge", requireSessionOnly, (req, res) => {
 
 // Change your own password — requires re-entering the current one, same
 // safety bar as any other "prove it's really you" action.
+// ---- Signing keys ------------------------------------------------------------------
+// Android signing keys live in a user's own profile, like API keys: every route is
+// session-only (a signed-in human, never a Bearer key — a leaked CI key can't create,
+// list or delete keys) and scoped to req.user.id. The keystore and its passwords are
+// never returned, except once in the response that generates a key, so the owner can
+// keep an offline backup (losing the key means no future build can update installs).
+
+// POST /api/v1/signing-keys
+//   { name, mode: "generate", commonName? }
+//   { name, mode: "upload", keystoreBase64, storePassword, keyAlias, keyPassword }
+// Generating runs keytool in a throwaway container, so it's rate-limited per user.
+app.post("/api/v1/signing-keys", requireSessionOnly, async (req, res) => {
+  const body = req.body ?? {};
+  const name = body.name;
+
+  if (typeof name !== "string" || !SIGNING_KEY_NAME_PATTERN.test(name)) {
+    return res.status(400).json({ error: "name must be 1-64 lowercase letters, digits or dashes (e.g. \"clocker\")." });
+  }
+  if (body.mode !== "generate" && body.mode !== "upload") {
+    return res.status(400).json({ error: 'mode must be "generate" or "upload".' });
+  }
+  if (getSigningKeyForUserByName(req.user.id, name)) {
+    return res.status(409).json({ error: `You already have a signing key named "${name}".` });
+  }
+  if (!checkAndConsume(`signing-keys:${req.user.id}`, { max: 10, windowMs: 60 * 60 * 1000 })) {
+    return res.status(429).json({ error: "Too many signing-key requests — try again later." });
+  }
+
+  try {
+    let material;
+    let info;
+    if (body.mode === "generate") {
+      const generated = await generateSigningKeystore({
+        serverDir: resolve(dirname(fileURLToPath(import.meta.url)), "../.."),
+        alias: name,
+        commonName: typeof body.commonName === "string" ? body.commonName : name,
+      });
+      material = { keystore: generated.keystore, storePassword: generated.storePassword, keyPassword: generated.keyPassword };
+      info = generated;
+    } else {
+      const { keystoreBase64, storePassword, keyAlias, keyPassword } = body;
+      if (
+        typeof keystoreBase64 !== "string" || typeof storePassword !== "string" || !storePassword ||
+        typeof keyAlias !== "string" || typeof keyPassword !== "string" || !keyPassword
+      ) {
+        return res.status(400).json({ error: "keystoreBase64, storePassword, keyAlias and keyPassword are required to upload a key." });
+      }
+      const keystore = Buffer.from(keystoreBase64, "base64");
+      // A real keystore is a few KB; anything far bigger isn't one.
+      if (keystore.length === 0 || keystore.length > 64 * 1024) {
+        return res.status(400).json({ error: "keystoreBase64 must be a keystore file (up to 64 KB), base64-encoded." });
+      }
+      info = await inspectUploadedKeystore({
+        serverDir: resolve(dirname(fileURLToPath(import.meta.url)), "../.."),
+        keystore,
+        storePassword,
+        keyAlias,
+        keyPassword,
+      });
+      material = { keystore, storePassword, keyPassword };
+    }
+
+    const createdAt = new Date().toISOString();
+    const result = createSigningKey({
+      userId: req.user.id,
+      name,
+      keyAlias: info.keyAlias,
+      storeType: info.storeType,
+      certSha256: info.certSha256,
+      secretPayload: encryptSigningMaterial(material, secretsKey),
+      createdAt,
+    });
+
+    const response = {
+      id: result.lastInsertRowid,
+      name,
+      keyAlias: info.keyAlias,
+      storeType: info.storeType,
+      certSha256: info.certSha256,
+      createdAt,
+    };
+    if (body.mode === "generate") {
+      // Shown once, for the owner's offline backup — never retrievable again.
+      response.backup = {
+        filename: `${name}.p12`,
+        keystoreBase64: material.keystore.toString("base64"),
+        storePassword: material.storePassword,
+        keyPassword: material.keyPassword,
+      };
+    }
+    logger.info("Signing key created", { userId: req.user.id, name, mode: body.mode });
+    return res.status(201).json(response);
+  } catch (error) {
+    // keytool / validation messages never contain a password (see signingKeys.mjs).
+    return res.status(400).json({ error: error.message });
+  }
+});
+
+// GET /api/v1/signing-keys — the owner's keys: names and public fingerprints only.
+app.get("/api/v1/signing-keys", requireSessionOnly, (req, res) => {
+  return res.json({ signingKeys: listSigningKeysForUser(req.user.id) });
+});
+
+// DELETE /api/v1/signing-keys/:id  { confirmName }
+// Permanent and irreversible for any app signed with it, so the caller must retype the
+// key's name. Not found and not-yours both 404, to avoid confirming another user's key.
+app.delete("/api/v1/signing-keys/:id", requireSessionOnly, (req, res) => {
+  const id = Number(req.params.id);
+  const key = listSigningKeysForUser(req.user.id).find((k) => k.id === id);
+  if (!key) {
+    return res.status(404).json({ error: "Signing key not found." });
+  }
+  if (req.body?.confirmName !== key.name) {
+    return res.status(400).json({ error: "Type the key's name to confirm deleting it." });
+  }
+  deleteSigningKeyForUser(req.user.id, id);
+  logger.info("Signing key deleted", { userId: req.user.id, name: key.name });
+  return res.json({ id, deleted: true });
+});
+
 app.post("/api/v1/me/password", requireSessionOnly, (req, res) => {
   const { currentPassword, newPassword } = req.body ?? {};
   const user = getUserById(req.user.id);

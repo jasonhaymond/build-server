@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-10-28
+
+### Added
+
+- **Release signing with stored keys.** Profile → *Android signing keys*
+  generates a key (shown once for backup) or uploads an existing one; a build
+  asks for it with `build.signing: { "key": "<name>" }`. Keys are encrypted at
+  rest, per user, managed only from a signed-in session, and usable by an API
+  key only with the new `signing:use` scope. The worker hands the key to Gradle
+  through a private file (never an environment variable or command line),
+  deletes it when the build container exits, and fails the build unless the
+  artifact carries the key's certificate. New `signing_keys` table (migration
+  0007).
+
 ## [2.7.0] - 2026-10-28
 
 ### Added
